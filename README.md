@@ -1,9 +1,9 @@
 <p align="center">
-  <img src="mutter.png" alt="mutter" width="280" />
+  <img src="handyxmutter.png" alt="handyXmutter" width="280" />
 </p>
 
 <p align="center">
-  <em>A voice journal built on <a href="https://github.com/cjpais/Handy">Handy</a> — record, transcribe, think.</em>
+  <em>Where <a href="https://github.com/cjpais/Handy">Handy</a> meets journaling — record, transcribe, think.</em>
 </p>
 
 <p align="center">
@@ -16,23 +16,19 @@
 
 ---
 
-## What is Mutter?
+## What is handyXmutter?
 
-**Mutter** is a voice journal plugin for [Handy](https://github.com/cjpais/Handy), the open-source speech-to-text desktop app. It extends Handy with a full journaling experience — record voice notes, get instant transcriptions, refine them with AI, and organise everything into folders.
+**handyXmutter** is a voice journal that extends [Handy](https://github.com/cjpais/Handy), the open-source speech-to-text desktop app. Record voice notes, get instant offline transcriptions, refine them with AI, and organise everything into folders — all from within Handy's interface.
 
-Mutter lives inside Handy as a second sidebar mode. Switch between Handy's transcription tools and Mutter's journal with a single click. All of Handy's core features — offline transcription, model selection, keyboard shortcuts — remain fully available.
+The name says it: **Handy × Mutter**. Handy gives you the voice pipeline. Mutter ("to speak quietly, almost to yourself") gives you the journal. Together they're a thinking tool.
 
-### Why "Mutter"?
-
-To mutter is to speak quietly, almost to yourself — which is exactly what journaling is. You mutter your thoughts, and Mutter captures them.
-
-## Built on Handy (with love)
+## Built on Handy
 
 This project is a **fork of [Handy](https://github.com/cjpais/Handy)** by [@cjpais](https://github.com/cjpais). We believe in Handy's philosophy:
 
 > *"Handy isn't trying to be the best speech-to-text app — it's trying to be the most forkable one."*
 
-Mutter is what happens when you take that invitation seriously. Every feature in Mutter is built on top of Handy's excellent audio pipeline, transcription engine, and Tauri architecture. We sync regularly with upstream to stay current with Handy's improvements.
+handyXmutter is what happens when you take that invitation seriously. Every feature is built on top of Handy's audio pipeline, transcription engine, and Tauri architecture. We sync regularly with upstream to stay current.
 
 **Handy gives you the voice. Mutter gives you the journal.**
 
@@ -49,12 +45,12 @@ Sequential prompt pipeline that progressively refines your transcript:
 
 | Step | What it does |
 |------|-------------|
-| **Clean** | Chunks into paragraphs, preserves exact wording |
+| **Clean** | Deduplicates repeated words, chunks into paragraphs |
 | **Structure** | Adds headings and bullet points |
 | **Organise** | Regroups by theme, adds a summary |
 | **Report** | Generates a professional report with action items |
 
-Each step builds on the previous one. Undo any step to restore the earlier version.
+Each step builds on the previous one. Undo any step to restore the earlier version. Consecutive duplicate words (a common speech-to-text artefact) are automatically stripped before each prompt.
 
 ### Chat Assistant ("mutter")
 Four modes for interacting with your journal entries:
@@ -62,7 +58,7 @@ Four modes for interacting with your journal entries:
 - **Jotter** — Free-form markdown notepad (no AI). Edit/preview toggle, auto-saved.
 - **Retrieve** — Strict factual Q&A from your entry and linked entries. No speculation.
 - **Sharpen** — Summarise, paraphrase, and reframe. Grounded in your content.
-- **Brainstorm** — Mutter becomes a thinking coach — asks probing questions, challenges assumptions, encourages deeper reflection.
+- **Brainstorm** — Thinking coach — asks probing questions, challenges assumptions, encourages deeper reflection.
 
 Chat sessions are persistent (stored in SQLite) and resume where you left off.
 
@@ -77,8 +73,6 @@ Search bar in the sidebar with advanced syntax:
 | `::date` | Dates — `today`, `this week`, `jan 2025`, `2025-01` |
 | `[name]` | Entries linked to entries matching the name |
 
-Click the **?** icon in the search bar for a quick reference.
-
 ### Tags & Links
 - **Tags** — Add custom tags to entries, click tag badges to browse by tag
 - **Linked entries** — Connect related journal entries, navigate between them via breadcrumb trail
@@ -86,11 +80,10 @@ Click the **?** icon in the search bar for a quick reference.
 ### File Management
 - **Markdown sync** — Every transcript, chat, and jot is automatically written as `.md` files alongside the audio
 - **Configurable storage** — Choose where your recordings and files are stored
-- **File naming** — `{title}.wav`, `{title}.md`, `{title} - Chat - {Mode} - {session}.md`
 - **Atomic operations** — Renaming, moving, or deleting an entry updates all associated files
 
 ### Everything Handy Offers
-Since Mutter is built on Handy, you also get:
+Since handyXmutter is built on Handy, you also get:
 - Offline speech-to-text with Whisper, Parakeet, Moonshine, and more
 - Global keyboard shortcuts and push-to-talk
 - Post-processing with any OpenAI-compatible API
@@ -98,10 +91,6 @@ Since Mutter is built on Handy, you also get:
 - Recording overlay
 - Transcription history
 - Cross-platform (macOS, Windows, Linux)
-
-## Screenshots
-
-*Coming soon*
 
 ## Getting Started
 
@@ -114,8 +103,8 @@ Since Mutter is built on Handy, you also get:
 
 ```bash
 # Clone the repo
-git clone https://github.com/yeoyongkiat/Handy.git mutter
-cd mutter
+git clone https://github.com/yeoyongkiat/handyXmutter.git
+cd handyXmutter
 
 # Install dependencies
 bun install
@@ -131,7 +120,7 @@ bun run tauri dev
 CMAKE_POLICY_VERSION_MINIMUM=3.5 bun run tauri dev
 ```
 
-### Using Mutter
+### Using handyXmutter
 
 1. Launch the app — you'll see Handy's standard interface
 2. Click the **mutter** logo at the bottom of the sidebar
@@ -143,11 +132,11 @@ CMAKE_POLICY_VERSION_MINIMUM=3.5 bun run tauri dev
 
 ## Architecture
 
-Mutter extends Handy's architecture without modifying its core contracts:
+handyXmutter extends Handy's architecture without modifying its core contracts:
 
 ```
 ┌─────────────────────────────────────────────┐
-│                   Mutter                     │
+│               handyXmutter                   │
 │  ┌──────────┐  ┌──────────┐  ┌───────────┐  │
 │  │ Journal   │  │ Chat     │  │ Search    │  │
 │  │ Manager   │  │ Sessions │  │ (client)  │  │
@@ -163,27 +152,15 @@ Mutter extends Handy's architecture without modifying its core contracts:
 └─────────────────────────────────────────────┘
 ```
 
-**Backend (Rust):**
-- `src-tauri/src/managers/journal.rs` — JournalManager with SQLite DB and file management
-- `src-tauri/src/commands/journal.rs` — 28 Tauri commands for CRUD, recording, chat, and file operations
+## Direction
 
-**Frontend (React/TypeScript):**
-- `src/components/settings/journal/JournalSettings.tsx` — Full journal UI
-- `src/components/mutter/MutterPanel.tsx` — Tab bar and content routing
-- `src/lib/journal.ts` — Types and command wrappers
-- `src/stores/mutterStore.ts` — Zustand store for cross-component state
+handyXmutter is a personal thinking tool. The goal isn't to build a feature-heavy note-taking app — it's to close the loop between *speaking your thoughts* and *making sense of them*.
 
-## The Plugin Vision
-
-Mutter demonstrates that Handy is genuinely forkable. We'd love to see Handy evolve a plugin architecture where extensions like Mutter can be developed and distributed independently — without forking the entire codebase.
-
-Until then, we'll keep building on top of Handy's excellent foundation, syncing upstream changes, and showing what's possible when a speech-to-text tool is designed to be extended.
-
-If you're thinking about building your own Handy plugin, Mutter's code is a practical reference for:
-- Adding new Tauri managers and commands alongside Handy's existing ones
-- Extending the sidebar with new modes
-- Reusing Handy's audio, transcription, and LLM pipelines
-- Adding SQLite-backed features with migration support
+What we're exploring:
+- **Voice-first journaling** — Speaking is faster and more honest than typing. The journal should make that effortless.
+- **AI as a thinking partner** — Not to write for you, but to help you think more clearly about what you already said.
+- **Local-first** — Your journal stays on your machine. Transcription runs offline. LLM calls are optional and configurable.
+- **Handy as a platform** — Demonstrating that Handy's architecture can support domain-specific tools beyond clipboard transcription.
 
 ## Syncing with Upstream
 
@@ -202,10 +179,10 @@ MIT License — same as Handy. See [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-- **[Handy](https://github.com/cjpais/Handy)** by [@cjpais](https://github.com/cjpais) — the foundation that makes Mutter possible
+- **[Handy](https://github.com/cjpais/Handy)** by [@cjpais](https://github.com/cjpais) — the foundation that makes this possible
 - **[Whisper](https://github.com/openai/whisper)** by OpenAI — speech recognition
 - **[Tauri](https://tauri.app)** — Rust-based app framework
-- **[Claude Code](https://claude.ai/code)** — pair programming partner for building Mutter
+- **[Claude Code](https://claude.ai/code)** — pair programming partner
 
 ---
 

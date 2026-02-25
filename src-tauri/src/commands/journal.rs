@@ -6,6 +6,28 @@ use crate::managers::transcription::TranscriptionManager;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
 
+/// Remove consecutively repeated words from text.
+/// "your your your thing" → "your thing"
+fn dedup_consecutive_words(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut prev_word_lower = String::new();
+    let mut first = true;
+
+    for word in text.split_whitespace() {
+        let word_lower = word.to_lowercase();
+        if word_lower != prev_word_lower || first {
+            if !first {
+                result.push(' ');
+            }
+            result.push_str(word);
+            first = false;
+        }
+        prev_word_lower = word_lower;
+    }
+
+    result
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn start_journal_recording(
@@ -423,7 +445,11 @@ pub async fn apply_prompt_text_to_journal_entry(
         return Err("No model configured for the post-processing provider.".to_string());
     }
 
-    let processed_prompt = prompt_text.replace("${output}", &entry.transcription_text);
+    // Programmatically remove consecutively repeated words before sending to LLM.
+    // Local LLMs struggle with many duplicates (e.g. "your your your your ...").
+    let clean_text = dedup_consecutive_words(&entry.transcription_text);
+
+    let processed_prompt = prompt_text.replace("${output}", &clean_text);
 
     let result = crate::llm_client::send_chat_completion(&provider, api_key, &model, processed_prompt)
         .await
