@@ -11,6 +11,7 @@ import AccessibilityPermissions from "./components/AccessibilityPermissions";
 import Footer from "./components/footer";
 import Onboarding, { AccessibilityOnboarding } from "./components/onboarding";
 import { Sidebar, SidebarSection, SECTIONS_CONFIG } from "./components/Sidebar";
+import { MutterPanel } from "./components/mutter/MutterPanel";
 import { useSettings } from "./hooks/useSettings";
 import { useSettingsStore } from "./stores/settingsStore";
 import { commands } from "@/bindings";
@@ -19,6 +20,7 @@ import { getLanguageDirection, initializeRTL } from "@/lib/utils/rtl";
 type OnboardingStep = "accessibility" | "model" | "done";
 
 const renderSettingsContent = (section: SidebarSection) => {
+  if (section === "mutter") return null;
   const ActiveComponent =
     SECTIONS_CONFIG[section]?.component || SECTIONS_CONFIG.general.component;
   return <ActiveComponent />;
@@ -177,14 +179,18 @@ function App() {
           activeSection={currentSection}
           onSectionChange={setCurrentSection}
         />
-        {/* Scrollable content area */}
+        {/* Content area */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="flex-1 overflow-y-auto">
-            <div className="flex flex-col items-center p-4 gap-4">
-              <AccessibilityPermissions />
-              {renderSettingsContent(currentSection)}
+          {currentSection === "mutter" ? (
+            <MutterPanel />
+          ) : (
+            <div className="flex-1 overflow-y-auto">
+              <div className="flex flex-col items-center p-4 gap-4">
+                <AccessibilityPermissions />
+                {renderSettingsContent(currentSection)}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
       {/* Fixed footer at bottom */}

@@ -360,6 +360,9 @@ pub struct AppSettings {
     #[serde(default = "default_typing_tool")]
     pub typing_tool: TypingTool,
     pub external_script_path: Option<String>,
+    /// Custom storage path for Mutter journal files. If None, uses app_data_dir/journal_recordings/.
+    #[serde(default)]
+    pub journal_storage_path: Option<String>,
 }
 
 fn default_model() -> String {
@@ -724,6 +727,7 @@ pub fn get_default_settings() -> AppSettings {
         paste_delay_ms: default_paste_delay_ms(),
         typing_tool: default_typing_tool(),
         external_script_path: None,
+        journal_storage_path: None,
     }
 }
 

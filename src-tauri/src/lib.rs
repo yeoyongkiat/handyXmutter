@@ -26,6 +26,7 @@ use tauri_specta::{collect_commands, Builder};
 use env_filter::Builder as EnvFilterBuilder;
 use managers::audio::AudioRecordingManager;
 use managers::history::HistoryManager;
+use managers::journal::JournalManager;
 use managers::model::ModelManager;
 use managers::transcription::TranscriptionManager;
 #[cfg(unix)]
@@ -122,12 +123,15 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     );
     let history_manager =
         Arc::new(HistoryManager::new(app_handle).expect("Failed to initialize history manager"));
+    let journal_manager =
+        Arc::new(JournalManager::new(app_handle).expect("Failed to initialize journal manager"));
 
     // Add managers to Tauri's managed state
     app_handle.manage(recording_manager.clone());
     app_handle.manage(model_manager.clone());
     app_handle.manage(transcription_manager.clone());
     app_handle.manage(history_manager.clone());
+    app_handle.manage(journal_manager.clone());
 
     // Note: Shortcuts are NOT initialized here.
     // The frontend is responsible for calling the `initialize_shortcuts` command
@@ -345,6 +349,39 @@ pub fn run(cli_args: CliArgs) {
         commands::history::delete_history_entry,
         commands::history::update_history_limit,
         commands::history::update_recording_retention_period,
+        commands::journal::start_journal_recording,
+        commands::journal::stop_journal_recording,
+        commands::journal::get_partial_journal_transcription,
+        commands::journal::discard_journal_recording,
+        commands::journal::save_journal_entry,
+        commands::journal::get_journal_entries,
+        commands::journal::get_journal_entry,
+        commands::journal::update_journal_entry,
+        commands::journal::delete_journal_entry,
+        commands::journal::apply_journal_post_process,
+        commands::journal::apply_prompt_text_to_text,
+        commands::journal::update_journal_post_processed_text,
+        commands::journal::get_journal_audio_file_path,
+        commands::journal::retranscribe_journal_entry,
+        commands::journal::apply_prompt_to_journal_entry,
+        commands::journal::apply_prompt_text_to_journal_entry,
+        commands::journal::undo_journal_prompt,
+        commands::journal::update_journal_transcription_text,
+        commands::journal::import_audio_for_journal,
+        commands::journal::journal_chat,
+        commands::journal::create_chat_session,
+        commands::journal::get_chat_sessions,
+        commands::journal::save_chat_message,
+        commands::journal::get_chat_messages,
+        commands::journal::update_chat_session_title,
+        commands::journal::delete_chat_session,
+        commands::journal::create_journal_folder,
+        commands::journal::rename_journal_folder,
+        commands::journal::delete_journal_folder,
+        commands::journal::get_journal_folders,
+        commands::journal::move_journal_entry_to_folder,
+        commands::journal::get_journal_storage_path,
+        commands::journal::set_journal_storage_path,
         helpers::clamshell::is_laptop,
     ]);
 

@@ -8,6 +8,7 @@
   --color-logo-stroke: #382731;
   --color-text-stroke: #f6f6f6;
   --color-mid-gray: #808080;
+  --color-mutter-primary: #5ba8c8;
 }
 
 :root {
@@ -51,6 +52,7 @@
     --color-background: #2c2b29;
     --color-logo-primary: #f28cbb;
     --color-logo-stroke: #fad1ed;
+    --color-mutter-primary: #5dade2;
   }
 }
 
@@ -68,4 +70,242 @@
   fill: var(--color-logo-stroke);
   stroke: var(--color-logo-stroke);
   stroke-width: 1;
+}
+
+/* Jotter Tiptap Editor - Medium-like live markdown */
+.jotter-editor {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.jotter-editor .tiptap {
+  flex: 1;
+  outline: none;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--color-text);
+  opacity: 0.9;
+  padding-top: 0.25rem;
+}
+
+.jotter-editor .tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--color-text);
+  opacity: 0.2;
+  pointer-events: none;
+  height: 0;
+}
+
+.jotter-editor .tiptap p {
+  margin-bottom: 0.75rem;
+}
+
+.jotter-editor .tiptap p:last-child {
+  margin-bottom: 0;
+}
+
+.jotter-editor .tiptap h1 {
+  font-size: 1.125rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  margin-top: 1rem;
+}
+
+.jotter-editor .tiptap h2 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.jotter-editor .tiptap h3 {
+  font-size: 0.875rem;
+  font-weight: 700;
+  margin-bottom: 0.25rem;
+  margin-top: 0.5rem;
+}
+
+.jotter-editor .tiptap h1:first-child,
+.jotter-editor .tiptap h2:first-child,
+.jotter-editor .tiptap h3:first-child {
+  margin-top: 0;
+}
+
+.jotter-editor .tiptap strong {
+  font-weight: 700;
+}
+
+.jotter-editor .tiptap em {
+  font-style: italic;
+}
+
+.jotter-editor .tiptap s {
+  text-decoration: line-through;
+}
+
+.jotter-editor .tiptap ul {
+  list-style: disc;
+  padding-left: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.jotter-editor .tiptap ol {
+  list-style: decimal;
+  padding-left: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.jotter-editor .tiptap li {
+  margin-bottom: 0.25rem;
+}
+
+.jotter-editor .tiptap .jotter-blockquote {
+  border-left: 2px solid var(--color-mutter-primary);
+  opacity: 0.6;
+  padding-left: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.jotter-editor .tiptap .jotter-inline-code {
+  padding: 0.125rem 0.25rem;
+  background: var(--color-mid-gray);
+  opacity: 0.2;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  font-family: ui-monospace, monospace;
+}
+
+.jotter-editor .tiptap .jotter-code-block {
+  background: var(--color-mid-gray);
+  opacity: 0.85;
+  border-radius: 0.375rem;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.75rem;
+  font-family: ui-monospace, monospace;
+  overflow-x: auto;
+}
+
+.jotter-editor .tiptap hr {
+  border: none;
+  border-top: 1px solid var(--color-mid-gray);
+  opacity: 0.3;
+  margin: 1rem 0;
+}
+
+.jotter-editor .tiptap a {
+  color: var(--color-mutter-primary);
+  text-decoration: underline;
+}
+
+/* Mention badges */
+.jotter-mention {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.05rem 0.375rem;
+  border-radius: 9999px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+
+.jotter-mention-tag {
+  background: color-mix(in srgb, var(--color-mutter-primary) 20%, transparent);
+  color: var(--color-mutter-primary);
+}
+
+.jotter-mention-tag::before {
+  content: "#";
+  opacity: 0.5;
+  margin-right: 1px;
+}
+
+.jotter-mention-entry {
+  background: color-mix(in srgb, var(--color-mutter-primary) 12%, transparent);
+  color: var(--color-mutter-primary);
+  border: 1px dashed color-mix(in srgb, var(--color-mutter-primary) 40%, transparent);
+}
+
+.jotter-mention-entry::before {
+  content: "[[";
+  opacity: 0.4;
+  font-size: 0.6rem;
+  margin-right: 2px;
+}
+
+.jotter-mention-entry::after {
+  content: "]]";
+  opacity: 0.4;
+  font-size: 0.6rem;
+  margin-left: 2px;
+}
+
+.jotter-mention-folder {
+  background: color-mix(in srgb, var(--color-mid-gray) 15%, transparent);
+  color: var(--color-text);
+  opacity: 0.7;
+}
+
+.jotter-mention-folder::before {
+  content: "@";
+  opacity: 0.5;
+  margin-right: 1px;
+}
+
+/* Suggestion dropdown */
+.jotter-suggestion-dropdown {
+  background: var(--color-background);
+  border: 1px solid color-mix(in srgb, var(--color-mid-gray) 30%, transparent);
+  border-radius: 0.5rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  padding: 0.25rem;
+  min-width: 180px;
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 9999;
+}
+
+.jotter-suggestion-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.375rem;
+  font-size: 0.8rem;
+  color: var(--color-text);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.1s;
+}
+
+.jotter-suggestion-item:hover,
+.jotter-suggestion-item.is-selected {
+  background: color-mix(in srgb, var(--color-mutter-primary) 12%, transparent);
+}
+
+.jotter-suggestion-icon {
+  color: var(--color-mutter-primary);
+  font-weight: 600;
+  font-size: 0.75rem;
+  width: 1rem;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.jotter-suggestion-empty {
+  color: var(--color-text);
+  opacity: 0.4;
+  font-style: italic;
+  cursor: default;
+}
+
+.jotter-suggestion-empty:hover {
+  background: transparent;
 }

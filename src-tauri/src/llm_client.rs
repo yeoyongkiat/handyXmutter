@@ -186,6 +186,62 @@ pub async fn send_chat_completion_with_schema(
         .and_then(|choice| choice.message.content.clone()))
 }
 
+/// Send a multi-turn chat completion request
+/// Accepts a full message history (system, user, assistant messages)
+pub async fn send_chat_messages(
+    provider: &PostProcessProvider,
+    api_key: String,
+    model: &str,
+    messages: Vec<(String, String)>, // (role, content) pairs
+) -> Result<Option<String>, String> {
+    let base_url = provider.base_url.trim_end_matches('/');
+    let url = format!("{}/chat/completions", base_url);
+
+    debug!("Sending multi-turn chat request to: {}", url);
+
+    let client = create_client(provider, &api_key)?;
+
+    let chat_messages: Vec<ChatMessage> = messages
+        .into_iter()
+        .map(|(role, content)| ChatMessage { role, content })
+        .collect();
+
+    let request_body = ChatCompletionRequest {
+        model: model.to_string(),
+        messages: chat_messages,
+        response_format: None,
+    };
+
+    let response = client
+        .post(&url)
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Failed to read error response".to_string());
+        return Err(format!(
+            "API request failed with status {}: {}",
+            status, error_text
+        ));
+    }
+
+    let completion: ChatCompletionResponse = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse API response: {}", e))?;
+
+    Ok(completion
+        .choices
+        .first()
+        .and_then(|choice| choice.message.content.clone()))
+}
+
 /// Fetch available models from an OpenAI-compatible API
 /// Returns a list of model IDs
 pub async fn fetch_models(

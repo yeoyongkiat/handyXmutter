@@ -414,6 +414,25 @@ impl AudioRecordingManager {
             _ => None,
         }
     }
+    /// Get a clone of the current audio buffer without stopping recording.
+    /// Returns None if not currently recording.
+    pub fn get_partial_samples(&self) -> Option<Vec<f32>> {
+        if !*self.is_recording.lock().unwrap() {
+            return None;
+        }
+        if let Some(rec) = self.recorder.lock().unwrap().as_ref() {
+            match rec.get_partial_samples() {
+                Ok(samples) => Some(samples),
+                Err(e) => {
+                    error!("get_partial_samples failed: {e}");
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    }
+
     pub fn is_recording(&self) -> bool {
         matches!(
             *self.state.lock().unwrap(),

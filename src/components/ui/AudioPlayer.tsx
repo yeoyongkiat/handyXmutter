@@ -22,6 +22,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [loadedSrc, setLoadedSrc] = useState<string | null>(initialSrc ?? null);
   const [isLoading, setIsLoading] = useState(false);
+  const userTriggeredLoad = useRef(false);
 
   const audioRef = useRef<HTMLAudioElement>(null);
   const src = loadedSrc;
@@ -107,14 +108,15 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     };
   }, []);
 
-  // Auto-play when src becomes available (via onLoadRequest or autoPlay prop)
+  // Auto-play when src becomes available (only if user triggered or autoPlay)
   const prevLoadedSrc = useRef<string | null>(null);
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
 
-    // Play when loadedSrc changes from null to a value (lazy load case)
-    if (loadedSrc && !prevLoadedSrc.current && onLoadRequest) {
+    // Play when loadedSrc changes from null to a value (user-triggered lazy load)
+    if (loadedSrc && !prevLoadedSrc.current && onLoadRequest && userTriggeredLoad.current) {
+      userTriggeredLoad.current = false;
       audio.play().catch((error) => {
         console.error("Auto-play failed:", error);
       });
@@ -152,6 +154,15 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
     }
   }, [isDragging, handleMouseUp]);
 
+  // Eagerly load audio URL to get duration metadata
+  useEffect(() => {
+    if (!loadedSrc && onLoadRequest) {
+      onLoadRequest().then((url) => {
+        if (url) setLoadedSrc(url);
+      }).catch(() => {});
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Cleanup blob URLs on unmount
   useEffect(() => {
     return () => {
@@ -173,6 +184,7 @@ export const AudioPlayer: React.FC<AudioPlayerProps> = ({
         // If no src loaded yet, request it
         if (!src && onLoadRequest) {
           setIsLoading(true);
+          userTriggeredLoad.current = true;
           const newSrc = await onLoadRequest();
           setIsLoading(false);
           if (newSrc) {

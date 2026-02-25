@@ -57,6 +57,30 @@ export const formatDate = (timestamp: string, locale: string): string => {
 };
 
 /**
+ * Format a date string or timestamp to "DD MMM YYYY" format (e.g., "25 Feb 2026")
+ * @param timestamp - Unix timestamp in seconds (as string)
+ * @returns Formatted date string
+ */
+export const formatDateShort = (timestamp: string): string => {
+  try {
+    const timestampMs = parseInt(timestamp, 10) * 1000;
+    const date = new Date(timestampMs);
+
+    if (isNaN(date.getTime())) {
+      return timestamp;
+    }
+
+    const day = date.getDate().toString().padStart(2, "0");
+    const month = date.toLocaleString("en", { month: "short" });
+    const year = date.getFullYear();
+    return `${day} ${month} ${year}`;
+  } catch (error) {
+    console.error("Failed to format date:", error);
+    return timestamp;
+  }
+};
+
+/**
  * Format a date string or timestamp to a relative time string (e.g., "2 hours ago")
  * @param timestamp - Unix timestamp in seconds (as string)
  * @param locale - BCP 47 language tag (e.g., 'en', 'es', 'fr')
