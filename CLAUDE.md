@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Project Identity
+
+**handyXmutter** — a voice journal built on [Handy](https://github.com/cjpais/Handy). Fork lives at `yeoyongkiat/handyXmutter` on GitHub.
+
+- **App identifier**: `com.handyxmutter.journal`
+- **Rust crate**: `handyxmutter` / `handyxmutter_app_lib`
+- **Binary**: `handyxmutter`
+- **Remotes**: `origin` = `github.com/yeoyongkiat/handyXmutter`, `upstream` = `github.com/cjpais/Handy`
+- **Updater plugin**: Removed (not needed; was causing SIGABRT crash). Do NOT re-add `tauri-plugin-updater`.
+
 ## Development Commands
 
 **Prerequisites:** [Rust](https://rustup.rs/) (latest stable), [Bun](https://bun.sh/)
@@ -15,7 +25,7 @@ bun run tauri dev
 # If cmake error on macOS:
 CMAKE_POLICY_VERSION_MINIMUM=3.5 bun run tauri dev
 
-# Build for production
+# Build for production (.dmg)
 bun run tauri build
 
 # Linting and formatting (run before committing)
@@ -44,27 +54,35 @@ Handy is a cross-platform desktop speech-to-text app built with Tauri 2.x (Rust 
   - `model.rs` - Model downloading and management
   - `transcription.rs` - Speech-to-text processing pipeline
   - `history.rs` - Transcription history storage
+  - `journal.rs` - Journal entries, folders, chat sessions (SQLite)
 - `audio_toolkit/` - Low-level audio processing:
   - `audio/` - Device enumeration, recording, resampling
   - `vad/` - Voice Activity Detection (Silero VAD)
 - `commands/` - Tauri command handlers for frontend communication
+  - `journal.rs` - 28 journal commands + `dedup_consecutive_words()` utility
 - `shortcut.rs` - Global keyboard shortcut handling
 - `settings.rs` - Application settings management
+- `llm_client.rs` - LLM API calls (chat completion + multi-turn chat)
 
 ### Frontend Structure (src/)
 
 - `App.tsx` - Main component with onboarding flow
 - `components/settings/` - Settings UI (35+ files)
+- `components/settings/journal/JournalSettings.tsx` - Full journal UI (DetailView, FoldersView, etc.)
+- `components/mutter/MutterPanel.tsx` - Tab bar + content routing
+- `components/mutter/MutterSettings.tsx` - Prompt customization + storage location picker
 - `components/model-selector/` - Model management interface
 - `components/onboarding/` - First-run experience
 - `hooks/useSettings.ts`, `useModels.ts` - State management hooks
 - `stores/settingsStore.ts` - Zustand store for settings
+- `stores/mutterStore.ts` - Zustand store for journal cross-component state
+- `lib/journal.ts` - Types, default prompts, command wrappers
 - `bindings.ts` - Auto-generated Tauri type bindings (via tauri-specta)
 - `overlay/` - Recording overlay window code
 
 ### Key Patterns
 
-**Manager Pattern:** Core functionality organized into managers (Audio, Model, Transcription) initialized at startup and managed via Tauri state.
+**Manager Pattern:** Core functionality organized into managers (Audio, Model, Transcription, Journal) initialized at startup and managed via Tauri state.
 
 **Command-Event Architecture:** Frontend → Backend via Tauri commands; Backend → Frontend via events.
 
@@ -94,117 +112,80 @@ src/i18n/
     └── vi/translation.json  # Vietnamese
 ```
 
-## Mutter Plugin
+## handyXmutter Journal Plugin
 
-Mutter is a branded journal plugin built on top of Handy. It lives in the same codebase (fork: `yeoyongkiat/Handy`) and reuses Handy's audio recording, transcription, and post-processing pipeline.
-
-**Git workflow:** `origin` = fork, `upstream` = `cjpais/Handy`. Sync upstream with `git fetch upstream && git merge upstream/main`.
-
-### Mutter Architecture
-
-**UI structure:**
+### UI Structure
 - Sidebar has two modes (Handy / Mutter) with CSS transition animations between them
 - Clicking the mutter logo at the bottom of Handy's sidebar switches to the Mutter sidebar
 - Mutter sidebar shows the mutter logo at top, a file explorer with folders and journal entries, and Handy logo at bottom to switch back
-- The content/preview panel shows a tab bar at top (Journal tab, extensible for future features like Minutes)
+- The content/preview panel shows a tab bar at top (Journal tab, extensible for future features)
 - Cross-component state (sidebar ↔ content panel) managed via `src/stores/mutterStore.ts` (Zustand)
 
-**Search:**
+### Search
 - Search bar above folders in the Mutter sidebar, shared with main panel via `searchQuery` in Zustand store
 - Plain text: searches entry titles (case-insensitive)
 - `@query`: searches folder names, shows entries in matching folders
 - `#query`: searches tags
+- `::date`: searches by date — `today`, `yesterday`, `this week`, `last month`, `jan 2025`, `2025-01`, month names
 - `[query]`: finds entries that link to entries whose title matches query
-- `?` icon in search bar shows tooltip explaining syntax
+- `?` icon in search bar shows tooltip explaining syntax (rendered via React portal on document.body)
 - Search results rendered as `SearchResultsView` in the main panel with `ViewMode = "search"`
 - `searchEntries()` helper function in JournalSettings.tsx performs client-side filtering
 
-**Navigation model:**
+### Navigation Model
 - Folder-centric: Folders view → Folder detail → Entry detail
 - Breadcrumb navigation at top of content panel (`Folders > folder > entry`)
-- Linked entry traversal: clicking a linked entry appends to breadcrumb trail (`Folders > folder > A > B > C`)
-- Tag navigation: clicking a tag chip shows all entries with that tag (`Folders > folder > A > [tag badge]`)
-- Navigating from tag view to entry: `Folders > folder > A > [tag badge] > B`
-- `ViewMode` discriminated union tracks navigation state: `loading | welcome | folders | folder | new-entry | recording | draft | detail | tag | search`
+- Linked entry traversal: clicking a linked entry appends to breadcrumb trail
+- Tag navigation: clicking a tag chip shows all entries with that tag
+- `ViewMode` discriminated union: `loading | welcome | folders | folder | new-entry | recording | draft | detail | tag | search | importing`
 - Detail mode includes `trail: number[]` for linked entry history and `fromTag?: string` for tag-originated navigation
 
-**Backend files (src-tauri/src/):**
+### Backend (src-tauri/src/)
 - `managers/journal.rs` - JournalManager with `journal.db` (SQLite) and `journal_recordings/` directory
-  - DB tables: `journal_entries` (id, file_name, timestamp, title, transcription_text, post_processed_text, post_process_prompt_id, tags JSON, linked_entry_ids JSON, folder_id FK, transcript_snapshots JSON), `journal_folders` (id, name, created_at), `journal_chat_sessions` (id, entry_id FK, mode, title, created_at, updated_at), `journal_chat_messages` (id, session_id FK, role, content, created_at)
+  - DB tables: `journal_entries`, `journal_folders`, `journal_chat_sessions`, `journal_chat_messages`
   - 4 migrations: initial schema, folders/folder_id column, transcript_snapshots column, chat sessions/messages tables
   - Folders correspond to real filesystem directories inside `journal_recordings/`
-  - Moving entries between folders moves the WAV file on disk
-  - `update_transcription_text` method for re-transcribe and manual edits (preserves prompt_id)
-  - `apply_prompt_with_snapshot` pushes current text to snapshot stack before applying prompt
-  - `undo_last_prompt` pops last snapshot to restore previous text
-  - `clear_snapshots` resets snapshot stack (called on re-transcribe)
-- `commands/journal.rs` - 28 Tauri commands: start/stop/discard recording, CRUD entries, post-processing, audio file path, CRUD folders, move entry to folder, retranscribe, apply prompt, undo prompt, update transcription text, chat, CRUD chat sessions/messages, import audio, get/set storage path
-- `llm_client.rs` - Added `send_chat_messages` for multi-turn chat (role/content tuple pairs)
+- `commands/journal.rs` - 28 Tauri commands + `dedup_consecutive_words()` function
+  - **Word dedup**: Programmatically removes consecutively repeated words before every LLM prompt call (local LLMs can't handle many repetitions)
 
-**Frontend files (src/):**
-- `lib/journal.ts` - TypeScript types (`JournalEntry` with `transcript_snapshots`, `JournalFolder`, `JournalRecordingResult`, `ChatSession`, `ChatMessage`), `MUTTER_DEFAULT_PROMPTS` (Clean/Structure/Organise/Report), `getModelContextWindow()` for dynamic context window lookup by model name, and `invoke` wrappers for all 26 commands
-- `stores/mutterStore.ts` - Zustand store for `selectedEntryId`, `expandedFolderIds`, `toggleFolder`
-- `components/mutter/MutterPanel.tsx` - Tab bar + content routing; auto-injects `MUTTER_DEFAULT_PROMPTS` into Handy's post_process_prompts on mount
+### Frontend (src/)
+- `lib/journal.ts` - TypeScript types, `MUTTER_DEFAULT_PROMPTS` (Clean/Structure/Organise/Report), `MUTTER_DEFAULT_CHAT_INSTRUCTIONS`, `getModelContextWindow()`, and `invoke` wrappers
+- `stores/mutterStore.ts` - Zustand store for `selectedEntryId`, `expandedFolderIds`, `searchQuery`, `promptOverrides`
+- `components/mutter/MutterPanel.tsx` - Tab bar + content routing
+- `components/mutter/MutterSettings.tsx` - Prompt customization with reset-to-default icons, storage location picker
 - `components/settings/journal/JournalSettings.tsx` - Full journal UI with subcomponents:
-  - `WelcomeView` - First-run folder creation prompt
-  - `FoldersView` - Grid of folders with inline rename/delete
-  - `FolderDetailView` - Entry list within a folder
-  - `NewEntryView` - Record or Import audio choice screen (file dialog + drag-and-drop WAV)
-  - `RecordingView` - Recording in progress with timer
-  - `DraftView` - New entry form (title, transcription, post-processing, tags, linked entries, folder selector)
-  - `DetailView` - Entry detail with:
-    - Inline editing: click-to-edit title, editable transcript with 500ms debounced auto-save
-    - Tag/link dropdowns with outside-click dismissal
-    - Sequential prompt pipeline: `Re-transcribe | Clean > Structure > Organise > Report` with unlock logic (Clean first, then Structure, then Organise, then Report)
-    - Undo: click last active prompt badge to restore previous transcript from snapshot stack
-    - **Jots section**: Non-AI markdown notepad sessions displayed between transcription box and chat history
-    - **Chat history section**: Persistent AI chat sessions (Retrieve, Sharpen, Brainstorm) displayed below jots
-    - Chat assistant "mutter": FAB button opens expandable panel with 4 modes (Jotter, Retrieve, Sharpen, Brainstorm)
-    - Persistent chat: sessions and messages stored in SQLite, resumed on click
-    - Context window meter: token usage bar with model name, auto-compaction at 80%, clickable for custom limit override
-    - Dynamic context window detection via `getModelContextWindow()` (supports Gemma, Gemini, GPT, Claude, Llama, Mixtral, Mistral, Qwen, DeepSeek, Phi, Command-R)
-    - LLM-generated chat titles on first close; inline rename via double-click
-    - Auto-growing chat textarea with send button
-    - Markdown rendering with custom code component for tag badges
-  - `JournalEntryCard` - Reusable entry list item
-  - `FolderCreateButton` - Inline folder creation in breadcrumb action area
-  - `MutterButton` - Baby blue themed button component
-- `assets/mutter-logo.png` - Mutter branding logo
+  - `WelcomeView`, `FoldersView`, `FolderDetailView`, `NewEntryView`, `RecordingView`, `DraftView`, `ImportingView`, `SearchResultsView`
+  - `DetailView` - Entry detail with inline editing, prompt pipeline, jots, chat history, chat assistant
 
-**Modified Handy files:**
-- `Sidebar.tsx` - Extended `SidebarSection` type with `"mutter"`, dual-panel sidebar with transitions. MutterFileExplorer component shows collapsible folders with entry counts, drag-and-drop entries into folders, inline folder create/rename/delete
-- `App.tsx` - Conditional rendering: MutterPanel for mutter section, standard settings for Handy sections
-- `App.css` - Added `--color-mutter-primary` CSS custom property (light: `#5ba8c8`, dark: `#5dade2`)
-- `tailwind.config.js` - Added `mutter-primary` color token (legacy v3 config; Tailwind v4 uses `@theme` in App.css)
-- `i18n/locales/en/translation.json` - Added `settings.journal.*` and `mutter.tabs.*` keys
+### Post-Processing Pipeline
+- `MUTTER_DEFAULT_PROMPTS`: Clean → Structure → Organise → Report (sequential unlock)
+- **Clean**: Fix spelling/punctuation, convert number words to digits, remove filler words, dedup repeated words
+- **Structure**: Chunk into coherent paragraphs with double newlines
+- **Organise**: Group paragraphs with sub-headers
+- **Report**: Reported speech format with bullets and sub-headers
+- Prompts customizable in MutterSettings with per-prompt reset-to-default icons
+- Undo via `transcript_snapshots` stack in SQLite
+- Backend `dedup_consecutive_words()` runs before every LLM call
 
-**Key patterns:**
-- Journal commands are registered in both `bindings.ts` (auto-generated via tauri-specta) and `lib/journal.ts` (manual `invoke` wrappers); frontend components use the manual wrappers from `lib/journal.ts`
-- Recording reuses Handy's AudioRecordingManager and TranscriptionManager with `"journal"` binding_id; defensive `stopRecording()` call before start to clear stale state
+### Chat Assistant ("mutter")
+- 4 modes: Jotter (non-AI notepad), Retrieve, Sharpen, Brainstorm
+- Persistent sessions stored in SQLite; create session lazily on first message
+- Chat panel: sticky bottom, minimised height `h-[28rem]`, maximised `h-[80vh]`
+- Auto-scroll uses `container.scrollTop = container.scrollHeight` (NOT `scrollIntoView` which scrolls the page)
+- LLM responses: no shaded background box, paragraph spacing via `[&_p]:mb-3`
+- Double-click session title to rename (title span has `onClick stopPropagation` to prevent parent click from firing)
+- LLM-generated chat titles on first close; context window meter with auto-compaction at 80%
+
+### Key Patterns
+- Journal commands registered in both `bindings.ts` and `lib/journal.ts`; frontend uses manual wrappers from `lib/journal.ts`
+- Recording reuses Handy's AudioRecordingManager and TranscriptionManager with `"journal"` binding_id
 - Post-processing reuses `crate::llm_client::send_chat_completion`; multi-turn chat uses `crate::llm_client::send_chat_messages`
-- Re-transcribe reads WAV file via `hound::WavReader`, converts samples to f32, re-runs transcription pipeline, clears snapshot stack
 - File explorer listens for `journal-updated` Tauri events for real-time updates
-- Sidebar drag-and-drop uses mouse-event-based drag (mousedown/mousemove/mouseup) with a 5px threshold, not HTML5 drag API (unreliable in Tauri WKWebView); preview panel entries use `dataTransfer` with `application/x-journal-entry-id` type
-- Folder operations are atomic: DB update + filesystem move happen together
-- **File naming convention**: Audio and markdown files use the entry title as base name (`{title}.wav`, `{title}.md`). Chat files: `{title} - Chat - {Mode} - {session_title}.md`. Jot files: `{title} - Jot - {session_title}.md`. Filenames are sanitized (unsafe chars replaced with `_`). Conflicts resolved by appending `(2)`, `(3)`, etc.
-- **Markdown file sync**: Transcript `.md` files auto-written on save, edit, prompt apply, prompt undo. Chat/jot `.md` files auto-written on each message save. Files renamed when entry title changes. Files moved when entry moves between folders. Files deleted when entry is deleted.
-- **Configurable storage path**: `journal_storage_path` in AppSettings. `effective_recordings_dir()` method returns configured path or default. Migration copies files from old to new path on change.
-- DetailView uses inline editing: title saves on blur, tags/links save immediately on add/remove, transcript editable with 500ms debounce
-- Transcription rendered with react-markdown + remark-breaks + remark-gfm; text preprocessed to strip quotes and convert literal `\n`; custom `code` component renders inline backtick text as tag badges when matching known tags
-- Tag/link dropdowns use outside-click detection with refs for dismissal
-- Breadcrumb trail preserved during linked entry and tag navigation; `selectedEntryId` useEffect only fires for direct sidebar selection (trail.length === 0)
-- Prompt pipeline: `MUTTER_DEFAULT_PROMPTS` (Clean, Structure, Organise, Report) auto-injected on mount; sequential unlock; undo via `transcript_snapshots` stack
-- New entry flow: clicking "New Entry" shows Record/Import choice screen (not auto-start recording)
-- Audio import: reads WAV (int16/int32/float), mixes to mono, resamples to 16kHz via linear interpolation, transcribes, saves
-- Chat assistant "mutter" with 4 modes:
-  - **Jotter**: Non-AI free-form markdown notepad with Edit/Preview toggle; sessions saved to "Jots" section (separate from chat history); auto-titled from first line of text on close; 500ms debounced auto-save
-  - **Retrieve**: Strict factual retrieval from entry + linked entries; no speculation
-  - **Sharpen**: Summarise, paraphrase, reframe; grounded in entry content
-  - **Brainstorm**: Coaching mode — mutter asks probing questions, teases out assumptions, encourages deeper thinking; auto-starts with opening questions when selected
-- Persistent chat sessions stored in SQLite; create session lazily on first message (or immediately for brainstorm auto-start)
-- Context window management: token estimation (~4 chars/token), auto-compaction at 80% via LLM summarization, clickable meter for manual override
-- LLM-generated chat titles on first close (6-word summary); inline rename via double-click on session badge
-- DetailView layout order: entry box → Jots section → Chat History section → FAB button
+- Sidebar drag-and-drop uses mouse events (not HTML5 drag API — unreliable in Tauri WKWebView)
+- **File naming**: `{title}.wav`, `{title}.md`, `{title} - Chat - {Mode} - {session_title}.md`, `{title} - Jot - {jot_title}.md`
+- **Markdown file sync**: Transcript `.md` auto-written on save/edit/prompt apply/undo. Chat/jot `.md` on each message save. Files renamed/moved/deleted with entry.
+- **Configurable storage path**: `journal_storage_path` in AppSettings; migration copies files on change
+- Audio import: reads WAV (int16/int32/float), mixes to mono, resamples to 16kHz, transcribes, saves; `ImportingView` shows indeterminate progress bar
 
 ## Tailwind CSS v4
 
@@ -243,7 +224,7 @@ Use conventional commits:
 
 ## CLI Parameters
 
-Handy supports command-line parameters on all platforms for integration with scripts, window managers, and autostart configurations.
+handyXmutter supports command-line parameters on all platforms.
 
 **Implementation files:**
 
@@ -263,13 +244,6 @@ Handy supports command-line parameters on all platforms for integration with scr
 | `--no-tray`              | Launch without the system tray icon (closing window quits the app)                 |
 | `--debug`                | Enable debug mode with verbose (Trace) logging                                     |
 
-**Key design decisions:**
-
-- CLI flags are runtime-only overrides — they do NOT modify persisted settings
-- Remote control flags (`--toggle-transcription`, `--toggle-post-process`, `--cancel`) work by launching a second instance that sends its args to the running instance via `tauri_plugin_single_instance`, then exits
-- `send_transcription_input()` in `signal_handle.rs` is shared between signal handlers and CLI to avoid code duplication
-- `CliArgs` is stored in Tauri managed state (`.manage()`) so it's accessible in `on_window_event` and other handlers
-
 ## Debug Mode
 
 Access debug features: `Cmd+Shift+D` (macOS) or `Ctrl+Shift+D` (Windows/Linux)
@@ -280,9 +254,15 @@ Binary paths (needed when shell profile isn't loaded, e.g., in Claude Code):
 - **Bun**: `~/.bun/bin/bun`
 - **Cargo/Rust**: `~/.cargo/bin/cargo`
 - Use: `export PATH="$HOME/.bun/bin:$HOME/.cargo/bin:$PATH"` before running commands
+- When running via Claude Code Bash tool, also include `/usr/bin:/usr/sbin:/bin:/sbin` in PATH (sandbox strips system paths)
 
 ## Platform Notes
 
 - **macOS**: Metal acceleration, accessibility permissions required
 - **Windows**: Vulkan acceleration, code signing
 - **Linux**: OpenBLAS + Vulkan, limited Wayland support, overlay disabled by default
+
+## Git Workflow
+
+- Push only to `origin` (`yeoyongkiat/handyXmutter`), never `upstream`
+- Sync with upstream: `git fetch upstream && git merge upstream/main`
