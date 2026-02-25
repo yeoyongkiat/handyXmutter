@@ -45,12 +45,12 @@ Sequential prompt pipeline that progressively refines your transcript:
 
 | Step | What it does |
 |------|-------------|
-| **Clean** | Deduplicates repeated words, chunks into paragraphs |
-| **Structure** | Adds headings and bullet points |
-| **Organise** | Regroups by theme, adds a summary |
-| **Report** | Generates a professional report with action items |
+| **Clean** | Fixes spelling, capitalisation, and punctuation; converts number words to digits; replaces spoken punctuation with symbols; removes filler words and repeated words |
+| **Structure** | Chunks the transcript into coherent paragraphs with spacing |
+| **Organise** | Groups paragraphs into coherent themes with sub-headers |
+| **Report** | Reformats into reported speech with bullets and sub-headers |
 
-Each step builds on the previous one. Undo any step to restore the earlier version. Consecutive duplicate words (a common speech-to-text artefact) are automatically stripped before each prompt.
+Each step builds on the previous one. Undo any step to restore the earlier version. Consecutive duplicate words (a common speech-to-text artefact) are automatically stripped before each prompt. All prompts are customisable in Mutter settings.
 
 ### Chat Assistant ("mutter")
 Four modes for interacting with your journal entries:
@@ -86,7 +86,7 @@ Search bar in the sidebar with advanced syntax:
 Since handyXmutter is built on Handy, you also get:
 - Offline speech-to-text with Whisper, Parakeet, Moonshine, and more
 - Global keyboard shortcuts and push-to-talk
-- Post-processing with any OpenAI-compatible API
+- Post-processing with any OpenAI-compatible API (cloud or local LLMs like Ollama, LM Studio)
 - Multi-language support
 - Recording overlay
 - Transcription history
@@ -140,15 +140,17 @@ handyXmutter extends Handy's architecture without modifying its core contracts:
 │  ┌──────────┐  ┌──────────┐  ┌───────────┐  │
 │  │ Journal   │  │ Chat     │  │ Search    │  │
 │  │ Manager   │  │ Sessions │  │ (client)  │  │
-│  │ (SQLite)  │  │ (SQLite) │  │           │  │
 │  └──────────┘  └──────────┘  └───────────┘  │
 ├─────────────────────────────────────────────┤
 │                   Handy                      │
 │  ┌──────────┐  ┌──────────┐  ┌───────────┐  │
 │  │ Audio    │  │ Transcrip│  │ LLM       │  │
 │  │ Pipeline │  │ tion     │  │ Client    │  │
-│  │ (cpal)   │  │ (whisper)│  │ (OpenAI)  │  │
+│  │ (cpal)   │  │ (whisper)│  │ (BYOK)    │  │
 │  └──────────┘  └──────────┘  └───────────┘  │
+│                 ┌──────────┐                 │
+│                 │ SQLite   │                 │
+│                 └──────────┘                 │
 └─────────────────────────────────────────────┘
 ```
 
