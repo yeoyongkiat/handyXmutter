@@ -1,6 +1,11 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+export interface ProcessingEntry {
+  status: string;
+  progress: number;
+}
+
 export interface MutterPromptOverrides {
   clean?: string;
   structure?: string;
@@ -26,6 +31,15 @@ interface MutterStore {
   /** Sidebar search query — shared with main panel */
   searchQuery: string;
   setSearchQuery: (query: string) => void;
+  /** Video tab state */
+  selectedVideoEntryId: number | null;
+  setSelectedVideoEntryId: (id: number | null) => void;
+  selectedVideoFolderId: number | null;
+  setSelectedVideoFolderId: (id: number | null) => void;
+  /** Entries currently being processed (importing, downloading, transcribing) */
+  processingEntries: Record<number, ProcessingEntry>;
+  setProcessingEntry: (id: number, status: string, progress: number) => void;
+  clearProcessingEntry: (id: number) => void;
 }
 
 export const useMutterStore = create<MutterStore>()(
@@ -55,6 +69,21 @@ export const useMutterStore = create<MutterStore>()(
       setPanelDragEntryId: (id) => set({ panelDragEntryId: id }),
       searchQuery: "",
       setSearchQuery: (query) => set({ searchQuery: query }),
+      selectedVideoEntryId: null,
+      setSelectedVideoEntryId: (id) => set({ selectedVideoEntryId: id }),
+      selectedVideoFolderId: null,
+      setSelectedVideoFolderId: (id) => set({ selectedVideoFolderId: id }),
+      processingEntries: {},
+      setProcessingEntry: (id, status, progress) =>
+        set((state) => ({
+          processingEntries: { ...state.processingEntries, [id]: { status, progress } },
+        })),
+      clearProcessingEntry: (id) =>
+        set((state) => {
+          const next = { ...state.processingEntries };
+          delete next[id];
+          return { processingEntries: next };
+        }),
     }),
     {
       name: "mutter-store",

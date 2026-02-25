@@ -54,7 +54,7 @@ rubato = "0.16.2"
 hound = "3.5.1"
 log = "0.4.25"
 env_filter = "0.1.0"
-tokio = "1.43.0"
+tokio = { version = "1.43.0", features = ["process", "io-util"] }
 vad-rs = { git = "https://github.com/cjpais/vad-rs", default-features = false }
 enigo = "0.6.1"
 rodio = { git = "https://github.com/cjpais/rodio.git" }
@@ -69,6 +69,7 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 tar = "0.4.44"
 flate2 = "1.0"
 transcribe-rs = { version = "0.2.5", features = ["whisper", "parakeet", "moonshine", "sense_voice"] }
+symphonia = { version = "0.5", features = ["isomp4", "mkv", "aac", "mp3", "vorbis", "pcm"] }
 handy-keys = "0.2.1"
 ferrous-opencc = "0.2.3"
 clap = { version = "4", features = ["derive"] }

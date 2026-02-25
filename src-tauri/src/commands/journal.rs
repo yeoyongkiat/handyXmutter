@@ -156,7 +156,7 @@ pub async fn get_journal_entries(
     journal_manager: State<'_, Arc<JournalManager>>,
 ) -> Result<Vec<JournalEntry>, String> {
     journal_manager
-        .get_entries()
+        .get_entries_by_source(Some("voice"))
         .await
         .map_err(|e| e.to_string())
 }
@@ -499,6 +499,23 @@ pub async fn update_journal_transcription_text(
     Ok(())
 }
 
+// --- Update entry after async processing ---
+
+#[tauri::command]
+#[specta::specta]
+pub async fn update_entry_after_processing(
+    journal_manager: State<'_, Arc<JournalManager>>,
+    id: i64,
+    file_name: String,
+    title: String,
+    transcription_text: String,
+) -> Result<(), String> {
+    journal_manager
+        .update_entry_after_processing(id, file_name, title, transcription_text)
+        .await
+        .map_err(|e| e.to_string())
+}
+
 // --- Import audio command ---
 
 #[tauri::command]
@@ -763,7 +780,7 @@ pub async fn get_journal_folders(
     journal_manager: State<'_, Arc<JournalManager>>,
 ) -> Result<Vec<JournalFolder>, String> {
     journal_manager
-        .get_folders()
+        .get_folders_by_source(Some("voice"))
         .await
         .map_err(|e| e.to_string())
 }

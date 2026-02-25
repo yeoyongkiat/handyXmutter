@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Rust crate**: `handyxmutter` / `handyxmutter_app_lib`
 - **Binary**: `handyxmutter`
 - **Remotes**: `origin` = `github.com/yeoyongkiat/handyXmutter`, `upstream` = `github.com/cjpais/Handy`
-- **Updater plugin**: Removed (not needed; was causing SIGABRT crash). Do NOT re-add `tauri-plugin-updater`.
+- **Updater plugin**: Rust-side plugin removed (was causing SIGABRT crash). Frontend `UpdateChecker` component still exists in UI but is non-functional (`check()` calls fail silently). To re-enable, need to: add back `tauri-plugin-updater` to Cargo.toml + lib.rs, configure signing keys, set up update endpoint in tauri.conf.json, and publish signed artifacts to GitHub Releases.
 
 ## Development Commands
 
@@ -53,16 +53,18 @@ Handy is a cross-platform desktop speech-to-text app built with Tauri 2.x (Rust 
   - `audio.rs` - Audio recording and device management
   - `model.rs` - Model downloading and management
   - `transcription.rs` - Speech-to-text processing pipeline
-  - `history.rs` - Transcription history storage
-  - `journal.rs` - Journal entries, folders, chat sessions (SQLite)
+  - `history.rs` - Transcription history storage (SQLite via rusqlite)
+  - `journal.rs` - Journal entries, folders, chat sessions (SQLite via rusqlite)
 - `audio_toolkit/` - Low-level audio processing:
   - `audio/` - Device enumeration, recording, resampling
   - `vad/` - Voice Activity Detection (Silero VAD)
 - `commands/` - Tauri command handlers for frontend communication
-  - `journal.rs` - 28 journal commands + `dedup_consecutive_words()` utility
+  - `journal.rs` - 28 journal commands + `dedup_consecutive_words()` utility + `update_entry_after_processing`
+  - `video.rs` - Video feature commands (yt-dlp management, YouTube audio download, video import, source-filtered CRUD)
+- `ytdlp.rs` - yt-dlp binary management (download/install binary, download audio, fetch video title via `tokio::process::Command`)
 - `shortcut.rs` - Global keyboard shortcut handling
 - `settings.rs` - Application settings management
-- `llm_client.rs` - LLM API calls (chat completion + multi-turn chat)
+- `llm_client.rs` - LLM API calls via any OpenAI-compatible API (BYOK — works with cloud providers and local LLMs like Ollama, LM Studio)
 
 ### Frontend Structure (src/)
 
@@ -118,7 +120,7 @@ src/i18n/
 - Sidebar has two modes (Handy / Mutter) with CSS transition animations between them
 - Clicking the mutter logo at the bottom of Handy's sidebar switches to the Mutter sidebar
 - Mutter sidebar shows the mutter logo at top, a file explorer with folders and journal entries, and Handy logo at bottom to switch back
-- The content/preview panel shows a tab bar at top (Journal tab, extensible for future features)
+- The content/preview panel shows a tab bar at top (Journal tab, Video tab)
 - Cross-component state (sidebar ↔ content panel) managed via `src/stores/mutterStore.ts` (Zustand)
 
 ### Search
@@ -137,25 +139,36 @@ src/i18n/
 - Breadcrumb navigation at top of content panel (`Folders > folder > entry`)
 - Linked entry traversal: clicking a linked entry appends to breadcrumb trail
 - Tag navigation: clicking a tag chip shows all entries with that tag
-- `ViewMode` discriminated union: `loading | welcome | folders | folder | new-entry | recording | draft | detail | tag | search | importing`
+- `ViewMode` discriminated union: `loading | welcome | folders | folder | new-entry | recording | draft | detail | tag | search | importing | youtube-input`
 - Detail mode includes `trail: number[]` for linked entry history and `fromTag?: string` for tag-originated navigation
 
 ### Backend (src-tauri/src/)
 - `managers/journal.rs` - JournalManager with `journal.db` (SQLite) and `journal_recordings/` directory
   - DB tables: `journal_entries`, `journal_folders`, `journal_chat_sessions`, `journal_chat_messages`
-  - 4 migrations: initial schema, folders/folder_id column, transcript_snapshots column, chat sessions/messages tables
+  - 5 migrations: initial schema, folders/folder_id column, transcript_snapshots column, chat sessions/messages tables, source/source_url columns
+  - `journal_entries` has `source` column (`voice`, `youtube`, `video`) and optional `source_url`
+  - `journal_folders` has `source` column (`voice`, `video`) to separate journal and video folders
   - Folders correspond to real filesystem directories inside `journal_recordings/`
 - `commands/journal.rs` - 28 Tauri commands + `dedup_consecutive_words()` function
   - **Word dedup**: Programmatically removes consecutively repeated words before every LLM prompt call (local LLMs can't handle many repetitions)
+- `commands/video.rs` - 8 Tauri commands for video feature
+  - `check_ytdlp_installed`, `install_ytdlp` - yt-dlp binary management
+  - `download_youtube_audio` - Downloads audio via yt-dlp, extracts via symphonia, transcribes in 30-second chunks, saves WAV. Returns `YouTubeDownloadResult { title, transcription, file_name }`
+  - `import_video_for_journal` - Extracts audio from video files via symphonia, resamples to 16kHz mono, transcribes in chunks
+  - `get_video_entries`, `get_video_folders`, `create_video_folder`, `save_video_entry` - Source-filtered CRUD
+  - `transcribe_chunked()` helper - Splits long audio into 30-second segments to avoid Parakeet ORT errors
 
 ### Frontend (src/)
-- `lib/journal.ts` - TypeScript types, `MUTTER_DEFAULT_PROMPTS` (Clean/Structure/Organise/Report), `MUTTER_DEFAULT_CHAT_INSTRUCTIONS`, `getModelContextWindow()`, and `invoke` wrappers
-- `stores/mutterStore.ts` - Zustand store for `selectedEntryId`, `expandedFolderIds`, `searchQuery`, `promptOverrides`
-- `components/mutter/MutterPanel.tsx` - Tab bar + content routing
+- `lib/journal.ts` - TypeScript types, `MUTTER_DEFAULT_PROMPTS`, `MUTTER_DEFAULT_CHAT_INSTRUCTIONS`, `getModelContextWindow()`, `journalCommands` and `videoCommands` wrappers
+- `stores/mutterStore.ts` - Zustand store for `selectedEntryId`, `expandedFolderIds`, `searchQuery`, `promptOverrides`, `selectedVideoEntryId`, `selectedVideoFolderId`, `processingEntries` (tracks in-progress downloads/imports)
+- `components/mutter/MutterPanel.tsx` - Tab bar (Journal + Video) + content routing via `JournalSettingsWithStore` and `VideoSettingsWithStore`
 - `components/mutter/MutterSettings.tsx` - Prompt customization with reset-to-default icons, storage location picker
-- `components/settings/journal/JournalSettings.tsx` - Full journal UI with subcomponents:
+- `components/settings/journal/JournalSettings.tsx` - Full journal/video UI with subcomponents:
   - `WelcomeView`, `FoldersView`, `FolderDetailView`, `NewEntryView`, `RecordingView`, `DraftView`, `ImportingView`, `SearchResultsView`
-  - `DetailView` - Entry detail with inline editing, prompt pipeline, jots, chat history, chat assistant
+  - `VideoNewEntryView` - Two cards: YouTube (download audio + transcribe via yt-dlp) and Import Video (extract audio + transcribe)
+  - `YouTubeInputView` - URL input for YouTube audio download
+  - `DetailView` - Entry detail with inline editing, prompt pipeline, jots, chat history, chat assistant. Shows processing overlay for in-progress downloads/imports
+  - Parameterized by `source` prop (`"voice"` | `"video"`) — determines which commands to use and which new-entry flow to show
 
 ### Post-Processing Pipeline
 - `MUTTER_DEFAULT_PROMPTS`: Clean → Structure → Organise → Report (sequential unlock)
@@ -186,6 +199,16 @@ src/i18n/
 - **Markdown file sync**: Transcript `.md` auto-written on save/edit/prompt apply/undo. Chat/jot `.md` on each message save. Files renamed/moved/deleted with entry.
 - **Configurable storage path**: `journal_storage_path` in AppSettings; migration copies files on change
 - Audio import: reads WAV (int16/int32/float), mixes to mono, resamples to 16kHz, transcribes, saves; `ImportingView` shows indeterminate progress bar
+
+### Video Feature
+- **Two entry points**: YouTube audio download + transcription, and local video file import
+- **YouTube (yt-dlp)**: Downloads audio via yt-dlp binary (`-f bestaudio[ext=m4a]/bestaudio`), extracts with symphonia, resamples to 16kHz mono, transcribes in 30-second chunks, saves as WAV. yt-dlp binary auto-downloaded from GitHub Releases to `app_data_dir()`, ad-hoc code-signed on macOS. Entries have `source="youtube"`, `source_url` set to YouTube URL, and playable audio files.
+- **yt-dlp events**: `ytdlp-download-progress` (binary install), `ytdlp-audio-progress` (download percentage), `ytdlp-status` (stage transitions: fetching-title → downloading → extracting → transcribing → done), `ytdlp-cancel` (user cancellation)
+- **Video import**: Uses `symphonia` crate to extract audio from MP4/MKV/WebM containers (AAC, Vorbis, MP3, PCM codecs). Resamples to 16kHz mono, transcribes in chunks via TranscriptionManager, saves extracted audio as WAV. Entries have `source="video"`.
+- **Processing persistence**: YouTube downloads and video imports create a pending entry immediately (empty fileName/transcription), navigate to DetailView, and process in the background. Progress tracked in `processingEntries` Zustand store. DetailView shows processing overlay with status and progress bar. JournalEntryCard shows spinner for in-progress entries. `update_entry_after_processing` backend command updates file_name, title, and transcription when done.
+- **Shared infrastructure**: Video entries use the same `journal_entries`/`journal_folders` tables, same post-processing pipeline, same chat/jots system. Separated by `source` column filtering.
+- **JournalSettings parameterized**: Accepts `source` prop (`"voice"` | `"video"`). Voice shows Record/Import Audio; Video shows YouTube/Import Video. All folder/entry management is identical.
+- **Important**: When creating entries with empty `file_name` (pending entries), `save_entry_with_source` must check `!file_name.is_empty() && src_path.is_file()` before rename — otherwise `root.join("")` resolves to the recordings directory itself and `fs::rename` fails with EINVAL.
 
 ## Tailwind CSS v4
 

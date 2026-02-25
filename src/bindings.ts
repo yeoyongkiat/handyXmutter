@@ -868,6 +868,14 @@ async updateJournalTranscriptionText(id: number, text: string) : Promise<Result<
     else return { status: "error", error: e  as any };
 }
 },
+async updateEntryAfterProcessing(id: number, fileName: string, title: string, transcriptionText: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_entry_after_processing", { id, fileName, title, transcriptionText }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async importAudioForJournal(filePath: string) : Promise<Result<JournalRecordingResult, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("import_audio_for_journal", { filePath }) };
@@ -988,6 +996,70 @@ async setJournalStoragePath(path: string) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
+async checkYtdlpInstalled() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("check_ytdlp_installed") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async installYtdlp() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("install_ytdlp") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async downloadYoutubeAudio(url: string) : Promise<Result<YouTubeDownloadResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("download_youtube_audio", { url }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async importVideoForJournal(filePath: string) : Promise<Result<JournalRecordingResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("import_video_for_journal", { filePath }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getVideoEntries() : Promise<Result<JournalEntry[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_video_entries") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getVideoFolders() : Promise<Result<JournalFolder[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_video_folders") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async createVideoFolder(name: string) : Promise<Result<JournalFolder, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_video_folder", { name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async saveVideoEntry(fileName: string, title: string, transcriptionText: string, source: string, sourceUrl: string | null, folderId: number | null) : Promise<Result<JournalEntry, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_video_entry", { fileName, title, transcriptionText, source, sourceUrl, folderId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Checks if the Mac is a laptop by detecting battery presence
  * 
@@ -1036,8 +1108,8 @@ export type ImplementationChangeResult = { success: boolean;
  * List of binding IDs that were reset to defaults due to incompatibility
  */
 reset_bindings: string[] }
-export type JournalEntry = { id: number; file_name: string; timestamp: number; title: string; transcription_text: string; post_processed_text: string | null; post_process_prompt_id: string | null; tags: string[]; linked_entry_ids: number[]; folder_id: number | null; transcript_snapshots: string[] }
-export type JournalFolder = { id: number; name: string; created_at: number }
+export type JournalEntry = { id: number; file_name: string; timestamp: number; title: string; transcription_text: string; post_processed_text: string | null; post_process_prompt_id: string | null; tags: string[]; linked_entry_ids: number[]; folder_id: number | null; transcript_snapshots: string[]; source: string; source_url: string | null }
+export type JournalFolder = { id: number; name: string; created_at: number; source: string }
 export type JournalRecordingResult = { file_name: string; transcription_text: string }
 export type KeyboardImplementation = "tauri" | "handy_keys"
 export type LLMPrompt = { id: string; name: string; prompt: string }
@@ -1052,6 +1124,7 @@ export type RecordingRetentionPeriod = "never" | "preserve_limit" | "days_3" | "
 export type ShortcutBinding = { id: string; name: string; description: string; default_binding: string; current_binding: string }
 export type SoundTheme = "marimba" | "pop" | "custom"
 export type TypingTool = "auto" | "wtype" | "kwtype" | "dotool" | "ydotool" | "xdotool"
+export type YouTubeDownloadResult = { title: string; transcription: string; file_name: string }
 
 /** tauri-specta globals **/
 

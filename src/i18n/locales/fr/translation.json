@@ -380,6 +380,29 @@
         "createFirst": "Cliquez sur 'Créer un nouveau prompt' ci-dessus pour créer votre premier prompt de post-traitement."
       }
     },
+    "video": {
+      "youtube": "YouTube",
+      "youtubeDesc": "Download audio and transcribe locally",
+      "importVideo": "Import Video",
+      "importVideoDesc": "Extract audio and transcribe a video file",
+      "importingVideo": "Importing video...",
+      "youtubeInput": "YouTube URL",
+      "youtubeInputDesc": "Paste the URL of a YouTube video to download and transcribe",
+      "fetchTranscript": "Download & Transcribe",
+      "ytdlpInstallPrompt": "This feature requires yt-dlp to download audio from YouTube. Would you like to install it now? (about 20 MB)",
+      "ytdlpInstalling": "Installing yt-dlp...",
+      "ytdlpInstalled": "yt-dlp installed successfully",
+      "downloadingAudio": "Downloading audio... {{progress}}",
+      "downloadingDesc": "Downloading audio from YouTube, extracting, and transcribing locally.",
+      "extractingAudio": "Extracting audio...",
+      "transcribingAudio": "Transcribing audio...",
+      "processing": "Processing...",
+      "welcome": {
+        "title": "Video Transcripts",
+        "description": "Download and transcribe YouTube videos or import video files to transcribe them locally.",
+        "createFirstFolder": "Create your first folder"
+      }
+    },
     "history": {
       "title": "Historique",
       "openFolder": "Ouvrir le dossier des enregistrements",
@@ -506,6 +529,34 @@
     "installing": "Installation...",
     "preparing": "Préparation...",
     "checkForUpdates": "Rechercher des mises à jour"
+  },
+  "mutter": {
+    "tabs": {
+      "journal": "Journal",
+      "video": "Video"
+    },
+    "settings": {
+      "title": "Mutter Settings",
+      "postProcessPrompts": "Post-Processing Prompts",
+      "postProcessPromptsDesc": "These prompts are applied sequentially to your transcription (Clean → Structure → Organise). Use ${output} as a placeholder for the transcript text.",
+      "chatPrompts": "Chat Prompts",
+      "chatPromptsDesc": "System instructions for each chat mode. The journal entry context is automatically appended.",
+      "clean": "Clean",
+      "structure": "Structure",
+      "organise": "Organise",
+      "report": "Report",
+      "retrieve": "Retrieve",
+      "sharpen": "Sharpen",
+      "brainstorm": "Brainstorm",
+      "resetToDefault": "Reset to default",
+      "customised": "Customised",
+      "storageLocation": "Storage Location",
+      "storageLocationDesc": "Choose where your recordings, transcriptions, and chat files are stored on your computer. Files are organised in the same folder structure as in Mutter.",
+      "chooseStorageFolder": "Choose storage folder",
+      "changeFolder": "Change",
+      "migrating": "Migrating...",
+      "storagePathUpdated": "Storage location updated"
+    }
   },
   "common": {
     "loading": "Chargement...",

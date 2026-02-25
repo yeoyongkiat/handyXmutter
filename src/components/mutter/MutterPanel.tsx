@@ -1,16 +1,20 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { BookOpen, Settings } from "lucide-react";
+import { BookOpen, Video, Settings } from "lucide-react";
 import { JournalSettings } from "../settings/journal/JournalSettings";
 import { MutterSettings } from "./MutterSettings";
 import { useMutterStore } from "@/stores/mutterStore";
 
-type MutterTab = "journal";
+type MutterTab = "journal" | "video";
 
 const MUTTER_TABS = {
   journal: {
     labelKey: "mutter.tabs.journal",
     icon: BookOpen,
+  },
+  video: {
+    labelKey: "mutter.tabs.video",
+    icon: Video,
   },
 } as const;
 
@@ -62,7 +66,10 @@ export const MutterPanel: React.FC = () => {
           {showSettings ? (
             <MutterSettings />
           ) : (
-            activeTab === "journal" && <JournalSettingsWithStore />
+            <>
+              {activeTab === "journal" && <JournalSettingsWithStore />}
+              {activeTab === "video" && <VideoSettingsWithStore />}
+            </>
           )}
         </div>
       </div>
@@ -79,6 +86,25 @@ const JournalSettingsWithStore: React.FC = () => {
 
   return (
     <JournalSettings
+      source="voice"
+      selectedEntryId={selectedEntryId}
+      selectedFolderId={selectedFolderId}
+      onSelectEntry={setSelectedEntryId}
+      onSelectFolder={setSelectedFolderId}
+    />
+  );
+};
+
+// Wrapper for the Video tab — uses JournalSettings with source="video"
+const VideoSettingsWithStore: React.FC = () => {
+  const selectedEntryId = useMutterStore((s) => s.selectedVideoEntryId);
+  const setSelectedEntryId = useMutterStore((s) => s.setSelectedVideoEntryId);
+  const selectedFolderId = useMutterStore((s) => s.selectedVideoFolderId);
+  const setSelectedFolderId = useMutterStore((s) => s.setSelectedVideoFolderId);
+
+  return (
+    <JournalSettings
+      source="video"
       selectedEntryId={selectedEntryId}
       selectedFolderId={selectedFolderId}
       onSelectEntry={setSelectedEntryId}

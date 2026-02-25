@@ -12,12 +12,21 @@ export interface JournalEntry {
   linked_entry_ids: number[];
   folder_id: number | null;
   transcript_snapshots: string[];
+  source: string;
+  source_url: string | null;
 }
 
 export interface JournalFolder {
   id: number;
   name: string;
   created_at: number;
+  source: string;
+}
+
+export interface YouTubeDownloadResult {
+  title: string;
+  transcription: string;
+  file_name: string;
 }
 
 export interface JournalRecordingResult {
@@ -311,6 +320,9 @@ export const journalCommands = {
   undoPrompt: (id: number, previousPromptId: string | null) =>
     invoke<string>("undo_journal_prompt", { id, previousPromptId }),
 
+  updateEntryAfterProcessing: (id: number, fileName: string, title: string, transcriptionText: string) =>
+    invoke<void>("update_entry_after_processing", { id, fileName, title, transcriptionText }),
+
   importAudio: (filePath: string) =>
     invoke<JournalRecordingResult>("import_audio_for_journal", { filePath }),
 
@@ -356,4 +368,60 @@ export const journalCommands = {
 
   setStoragePath: (path: string) =>
     invoke<void>("set_journal_storage_path", { path }),
+};
+
+// --- Video commands ---
+
+export const videoCommands = {
+  checkYtDlpInstalled: () => invoke<boolean>("check_ytdlp_installed"),
+
+  installYtDlp: () => invoke<void>("install_ytdlp"),
+
+  downloadYouTubeAudio: (url: string) =>
+    invoke<YouTubeDownloadResult>("download_youtube_audio", { url }),
+
+  importVideo: (filePath: string) =>
+    invoke<JournalRecordingResult>("import_video_for_journal", { filePath }),
+
+  getEntries: () => invoke<JournalEntry[]>("get_video_entries"),
+
+  getFolders: () => invoke<JournalFolder[]>("get_video_folders"),
+
+  createFolder: (name: string) =>
+    invoke<JournalFolder>("create_video_folder", { name }),
+
+  saveEntry: (params: {
+    fileName: string;
+    title: string;
+    transcriptionText: string;
+    source: string;
+    sourceUrl: string | null;
+    folderId: number | null;
+  }) => invoke<JournalEntry>("save_video_entry", params),
+
+  // Reuse journal commands for operations on individual entries
+  getEntry: journalCommands.getEntry,
+  updateEntry: journalCommands.updateEntry,
+  deleteEntry: journalCommands.deleteEntry,
+  applyPostProcess: journalCommands.applyPostProcess,
+  applyPromptTextToText: journalCommands.applyPromptTextToText,
+  updatePostProcessedText: journalCommands.updatePostProcessedText,
+  getAudioFilePath: journalCommands.getAudioFilePath,
+  updateTranscriptionText: journalCommands.updateTranscriptionText,
+  updateEntryAfterProcessing: journalCommands.updateEntryAfterProcessing,
+  applyPromptToEntry: journalCommands.applyPromptToEntry,
+  applyPromptTextToEntry: journalCommands.applyPromptTextToEntry,
+  undoPrompt: journalCommands.undoPrompt,
+  chat: journalCommands.chat,
+  createChatSession: journalCommands.createChatSession,
+  getChatSessions: journalCommands.getChatSessions,
+  saveChatMessage: journalCommands.saveChatMessage,
+  getChatMessages: journalCommands.getChatMessages,
+  updateChatSessionTitle: journalCommands.updateChatSessionTitle,
+  deleteChatSession: journalCommands.deleteChatSession,
+  renameFolder: journalCommands.renameFolder,
+  deleteFolder: journalCommands.deleteFolder,
+  moveEntryToFolder: journalCommands.moveEntryToFolder,
+  getStoragePath: journalCommands.getStoragePath,
+  setStoragePath: journalCommands.setStoragePath,
 };

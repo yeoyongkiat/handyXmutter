@@ -51,6 +51,11 @@ static MIGRATIONS: &[M] = &[
             created_at INTEGER NOT NULL
         );",
     ),
+    M::up(
+        "ALTER TABLE journal_entries ADD COLUMN source TEXT NOT NULL DEFAULT 'voice';
+        ALTER TABLE journal_entries ADD COLUMN source_url TEXT;
+        ALTER TABLE journal_folders ADD COLUMN source TEXT NOT NULL DEFAULT 'voice';",
+    ),
 ];
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -66,6 +71,8 @@ pub struct JournalEntry {
     pub linked_entry_ids: Vec<i64>,
     pub folder_id: Option<i64>,
     pub transcript_snapshots: Vec<String>,
+    pub source: String,
+    pub source_url: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -73,6 +80,7 @@ pub struct JournalFolder {
     pub id: i64,
     pub name: String,
     pub created_at: i64,
+    pub source: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -579,6 +587,27 @@ impl JournalManager {
         linked_entry_ids: Vec<i64>,
         folder_id: Option<i64>,
     ) -> Result<JournalEntry> {
+        self.save_entry_with_source(
+            file_name, title, transcription_text,
+            post_processed_text, post_process_prompt_id,
+            tags, linked_entry_ids, folder_id,
+            "voice".to_string(), None,
+        ).await
+    }
+
+    pub async fn save_entry_with_source(
+        &self,
+        file_name: String,
+        title: String,
+        transcription_text: String,
+        post_processed_text: Option<String>,
+        post_process_prompt_id: Option<String>,
+        tags: Vec<String>,
+        linked_entry_ids: Vec<i64>,
+        folder_id: Option<i64>,
+        source: String,
+        source_url: Option<String>,
+    ) -> Result<JournalEntry> {
         let timestamp = Utc::now().timestamp();
         let tags_json = serde_json::to_string(&tags)?;
         let linked_json = serde_json::to_string(&linked_entry_ids)?;
@@ -598,22 +627,26 @@ impl JournalManager {
             }
             None => root,
         };
-        let new_wav_path = unique_path(&dest_dir, &sanitized, ".wav");
-        let new_file_name = new_wav_path.file_name().unwrap().to_string_lossy().to_string();
 
-        if src_path.exists() {
+        let new_file_name = if !file_name.is_empty() && src_path.is_file() {
+            let new_wav_path = unique_path(&dest_dir, &sanitized, ".wav");
+            let name = new_wav_path.file_name().unwrap().to_string_lossy().to_string();
             fs::rename(&src_path, &new_wav_path)?;
             debug!("Renamed audio to title-based: {:?} -> {:?}", src_path, new_wav_path);
-        }
+            name
+        } else {
+            // No audio file (e.g. pending entry or YouTube transcript) — use sanitized title as file_name
+            format!("{}.md", sanitized)
+        };
 
         let conn = self.get_connection()?;
         conn.execute(
-            "INSERT INTO journal_entries (file_name, timestamp, title, transcription_text, post_processed_text, post_process_prompt_id, tags, linked_entry_ids, folder_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![new_file_name, timestamp, title, transcription_text, post_processed_text, post_process_prompt_id, tags_json, linked_json, folder_id],
+            "INSERT INTO journal_entries (file_name, timestamp, title, transcription_text, post_processed_text, post_process_prompt_id, tags, linked_entry_ids, folder_id, source, source_url) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![new_file_name, timestamp, title, transcription_text, post_processed_text, post_process_prompt_id, tags_json, linked_json, folder_id, source, source_url],
         )?;
 
         let id = conn.last_insert_rowid();
-        debug!("Saved journal entry {} to database", id);
+        debug!("Saved journal entry {} (source={}) to database", id, source);
 
         let entry = JournalEntry {
             id,
@@ -627,6 +660,8 @@ impl JournalManager {
             linked_entry_ids,
             folder_id,
             transcript_snapshots: vec![],
+            source,
+            source_url,
         };
 
         // Write transcript markdown file
@@ -639,65 +674,59 @@ impl JournalManager {
         Ok(entry)
     }
 
+    fn parse_entry_row(row: &rusqlite::Row) -> rusqlite::Result<JournalEntry> {
+        let tags_json: String = row.get("tags")?;
+        let linked_json: String = row.get("linked_entry_ids")?;
+        let snapshots_json: String = row.get("transcript_snapshots")?;
+        let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+        let linked_entry_ids: Vec<i64> = serde_json::from_str(&linked_json).unwrap_or_default();
+        let transcript_snapshots: Vec<String> =
+            serde_json::from_str(&snapshots_json).unwrap_or_default();
+        Ok(JournalEntry {
+            id: row.get("id")?,
+            file_name: row.get("file_name")?,
+            timestamp: row.get("timestamp")?,
+            title: row.get("title")?,
+            transcription_text: row.get("transcription_text")?,
+            post_processed_text: row.get("post_processed_text")?,
+            post_process_prompt_id: row.get("post_process_prompt_id")?,
+            tags,
+            linked_entry_ids,
+            folder_id: row.get("folder_id")?,
+            transcript_snapshots,
+            source: row.get("source")?,
+            source_url: row.get("source_url")?,
+        })
+    }
+
+    #[allow(dead_code)]
     pub async fn get_entries(&self) -> Result<Vec<JournalEntry>> {
+        self.get_entries_by_source(None).await
+    }
+
+    pub async fn get_entries_by_source(&self, source_filter: Option<&str>) -> Result<Vec<JournalEntry>> {
         let conn = self.get_connection()?;
-        let mut stmt = conn.prepare(
-            "SELECT id, file_name, timestamp, title, transcription_text, post_processed_text, post_process_prompt_id, tags, linked_entry_ids, folder_id, transcript_snapshots FROM journal_entries ORDER BY timestamp DESC",
-        )?;
-
-        let rows = stmt.query_map([], |row| {
-            let tags_json: String = row.get("tags")?;
-            let linked_json: String = row.get("linked_entry_ids")?;
-            let snapshots_json: String = row.get("transcript_snapshots")?;
-            Ok((
-                row.get::<_, i64>("id")?,
-                row.get::<_, String>("file_name")?,
-                row.get::<_, i64>("timestamp")?,
-                row.get::<_, String>("title")?,
-                row.get::<_, String>("transcription_text")?,
-                row.get::<_, Option<String>>("post_processed_text")?,
-                row.get::<_, Option<String>>("post_process_prompt_id")?,
-                tags_json,
-                linked_json,
-                row.get::<_, Option<i64>>("folder_id")?,
-                snapshots_json,
-            ))
-        })?;
-
         let mut entries = Vec::new();
-        for row in rows {
-            let (
-                id,
-                file_name,
-                timestamp,
-                title,
-                transcription_text,
-                post_processed_text,
-                post_process_prompt_id,
-                tags_json,
-                linked_json,
-                folder_id,
-                snapshots_json,
-            ) = row?;
-            let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
-            let linked_entry_ids: Vec<i64> =
-                serde_json::from_str(&linked_json).unwrap_or_default();
-            let transcript_snapshots: Vec<String> =
-                serde_json::from_str(&snapshots_json).unwrap_or_default();
 
-            entries.push(JournalEntry {
-                id,
-                file_name,
-                timestamp,
-                title,
-                transcription_text,
-                post_processed_text,
-                post_process_prompt_id,
-                tags,
-                linked_entry_ids,
-                folder_id,
-                transcript_snapshots,
-            });
+        match source_filter {
+            Some(source) => {
+                let mut stmt = conn.prepare(
+                    "SELECT id, file_name, timestamp, title, transcription_text, post_processed_text, post_process_prompt_id, tags, linked_entry_ids, folder_id, transcript_snapshots, source, source_url FROM journal_entries WHERE source = ?1 ORDER BY timestamp DESC",
+                )?;
+                let rows = stmt.query_map([source], |row| Self::parse_entry_row(row))?;
+                for row in rows {
+                    entries.push(row?);
+                }
+            }
+            None => {
+                let mut stmt = conn.prepare(
+                    "SELECT id, file_name, timestamp, title, transcription_text, post_processed_text, post_process_prompt_id, tags, linked_entry_ids, folder_id, transcript_snapshots, source, source_url FROM journal_entries ORDER BY timestamp DESC",
+                )?;
+                let rows = stmt.query_map([], |row| Self::parse_entry_row(row))?;
+                for row in rows {
+                    entries.push(row?);
+                }
+            }
         }
 
         Ok(entries)
@@ -706,64 +735,14 @@ impl JournalManager {
     pub async fn get_entry_by_id(&self, id: i64) -> Result<Option<JournalEntry>> {
         let conn = self.get_connection()?;
         let mut stmt = conn.prepare(
-            "SELECT id, file_name, timestamp, title, transcription_text, post_processed_text, post_process_prompt_id, tags, linked_entry_ids, folder_id, transcript_snapshots FROM journal_entries WHERE id = ?1",
+            "SELECT id, file_name, timestamp, title, transcription_text, post_processed_text, post_process_prompt_id, tags, linked_entry_ids, folder_id, transcript_snapshots, source, source_url FROM journal_entries WHERE id = ?1",
         )?;
 
         let entry = stmt
-            .query_row([id], |row| {
-                let tags_json: String = row.get("tags")?;
-                let linked_json: String = row.get("linked_entry_ids")?;
-                let snapshots_json: String = row.get("transcript_snapshots")?;
-                Ok((
-                    row.get::<_, i64>("id")?,
-                    row.get::<_, String>("file_name")?,
-                    row.get::<_, i64>("timestamp")?,
-                    row.get::<_, String>("title")?,
-                    row.get::<_, String>("transcription_text")?,
-                    row.get::<_, Option<String>>("post_processed_text")?,
-                    row.get::<_, Option<String>>("post_process_prompt_id")?,
-                    tags_json,
-                    linked_json,
-                    row.get::<_, Option<i64>>("folder_id")?,
-                    snapshots_json,
-                ))
-            })
+            .query_row([id], |row| Self::parse_entry_row(row))
             .optional()?;
 
-        Ok(entry.map(
-            |(
-                id,
-                file_name,
-                timestamp,
-                title,
-                transcription_text,
-                post_processed_text,
-                post_process_prompt_id,
-                tags_json,
-                linked_json,
-                folder_id,
-                snapshots_json,
-            )| {
-                let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
-                let linked_entry_ids: Vec<i64> =
-                    serde_json::from_str(&linked_json).unwrap_or_default();
-                let transcript_snapshots: Vec<String> =
-                    serde_json::from_str(&snapshots_json).unwrap_or_default();
-                JournalEntry {
-                    id,
-                    file_name,
-                    timestamp,
-                    title,
-                    transcription_text,
-                    post_processed_text,
-                    post_process_prompt_id,
-                    tags,
-                    linked_entry_ids,
-                    folder_id,
-                    transcript_snapshots,
-                }
-            },
-        ))
+        Ok(entry)
     }
 
     pub async fn update_entry(
@@ -812,6 +791,36 @@ impl JournalManager {
         }
 
         debug!("Updated journal entry {}", id);
+
+        if let Err(e) = self.app_handle.emit("journal-updated", ()) {
+            error!("Failed to emit journal-updated event: {}", e);
+        }
+
+        Ok(())
+    }
+
+    /// Update an entry after async processing completes (YouTube download, video import).
+    /// Sets file_name, title, and transcription_text in one go.
+    pub async fn update_entry_after_processing(
+        &self,
+        id: i64,
+        file_name: String,
+        title: String,
+        transcription_text: String,
+    ) -> Result<()> {
+        let conn = self.get_connection()?;
+
+        conn.execute(
+            "UPDATE journal_entries SET file_name = ?1, title = ?2, transcription_text = ?3 WHERE id = ?4",
+            params![file_name, title, transcription_text, id],
+        )?;
+
+        // Write the transcript .md file
+        if let Some(entry) = self.get_entry_by_id(id).await? {
+            self.write_transcript_md(&entry);
+        }
+
+        debug!("Updated entry {} after processing", id);
 
         if let Err(e) = self.app_handle.emit("journal-updated", ()) {
             error!("Failed to emit journal-updated event: {}", e);
@@ -999,6 +1008,10 @@ impl JournalManager {
     // and move_all_entry_files handles folder moves.
 
     pub async fn create_folder(&self, name: String) -> Result<JournalFolder> {
+        self.create_folder_with_source(name, "voice".to_string()).await
+    }
+
+    pub async fn create_folder_with_source(&self, name: String, source: String) -> Result<JournalFolder> {
         let created_at = Utc::now().timestamp();
 
         // Create actual directory
@@ -1011,11 +1024,11 @@ impl JournalManager {
 
         let conn = self.get_connection()?;
         conn.execute(
-            "INSERT INTO journal_folders (name, created_at) VALUES (?1, ?2)",
-            params![name, created_at],
+            "INSERT INTO journal_folders (name, created_at, source) VALUES (?1, ?2, ?3)",
+            params![name, created_at, source],
         )?;
         let id = conn.last_insert_rowid();
-        debug!("Created journal folder {} ('{}')", id, name);
+        debug!("Created journal folder {} ('{}', source={})", id, name, source);
 
         if let Err(e) = self.app_handle.emit("journal-updated", ()) {
             error!("Failed to emit journal-updated event: {}", e);
@@ -1025,6 +1038,7 @@ impl JournalManager {
             id,
             name,
             created_at,
+            source,
         })
     }
 
@@ -1091,21 +1105,50 @@ impl JournalManager {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub async fn get_folders(&self) -> Result<Vec<JournalFolder>> {
+        self.get_folders_by_source(None).await
+    }
+
+    pub async fn get_folders_by_source(&self, source_filter: Option<&str>) -> Result<Vec<JournalFolder>> {
         let conn = self.get_connection()?;
-        let mut stmt =
-            conn.prepare("SELECT id, name, created_at FROM journal_folders ORDER BY name ASC")?;
-        let rows = stmt.query_map([], |row| {
-            Ok(JournalFolder {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                created_at: row.get(2)?,
-            })
-        })?;
         let mut folders = Vec::new();
-        for row in rows {
-            folders.push(row?);
+
+        match source_filter {
+            Some(source) => {
+                let mut stmt = conn.prepare(
+                    "SELECT id, name, created_at, source FROM journal_folders WHERE source = ?1 ORDER BY name ASC",
+                )?;
+                let rows = stmt.query_map([source], |row| {
+                    Ok(JournalFolder {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        created_at: row.get(2)?,
+                        source: row.get(3)?,
+                    })
+                })?;
+                for row in rows {
+                    folders.push(row?);
+                }
+            }
+            None => {
+                let mut stmt = conn.prepare(
+                    "SELECT id, name, created_at, source FROM journal_folders ORDER BY name ASC",
+                )?;
+                let rows = stmt.query_map([], |row| {
+                    Ok(JournalFolder {
+                        id: row.get(0)?,
+                        name: row.get(1)?,
+                        created_at: row.get(2)?,
+                        source: row.get(3)?,
+                    })
+                })?;
+                for row in rows {
+                    folders.push(row?);
+                }
+            }
         }
+
         Ok(folders)
     }
 

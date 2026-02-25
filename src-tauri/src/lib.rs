@@ -18,6 +18,7 @@ mod transcription_coordinator;
 mod tray;
 mod tray_i18n;
 mod utils;
+pub mod ytdlp;
 
 pub use cli::CliArgs;
 use specta_typescript::{BigIntExportBehavior, Typescript};
@@ -367,6 +368,7 @@ pub fn run(cli_args: CliArgs) {
         commands::journal::apply_prompt_text_to_journal_entry,
         commands::journal::undo_journal_prompt,
         commands::journal::update_journal_transcription_text,
+        commands::journal::update_entry_after_processing,
         commands::journal::import_audio_for_journal,
         commands::journal::journal_chat,
         commands::journal::create_chat_session,
@@ -382,6 +384,14 @@ pub fn run(cli_args: CliArgs) {
         commands::journal::move_journal_entry_to_folder,
         commands::journal::get_journal_storage_path,
         commands::journal::set_journal_storage_path,
+        commands::video::check_ytdlp_installed,
+        commands::video::install_ytdlp,
+        commands::video::download_youtube_audio,
+        commands::video::import_video_for_journal,
+        commands::video::get_video_entries,
+        commands::video::get_video_folders,
+        commands::video::create_video_folder,
+        commands::video::save_video_entry,
         helpers::clamshell::is_laptop,
     ]);
 

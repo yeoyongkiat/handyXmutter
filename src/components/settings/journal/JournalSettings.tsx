@@ -29,6 +29,10 @@ import {
   Search,
   FolderOpen,
   Calendar,
+  Youtube,
+  Video,
+  Globe,
+  Loader2,
 } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -39,6 +43,7 @@ import { useOsType } from "@/hooks/useOsType";
 import { formatDateShort } from "@/utils/dateFormat";
 import {
   journalCommands,
+  videoCommands,
   MUTTER_DEFAULT_PROMPTS,
   MUTTER_DEFAULT_CHAT_INSTRUCTIONS,
   type JournalEntry,
@@ -64,16 +69,18 @@ const MutterButton: React.FC<
 };
 
 // Inline folder creation button for breadcrumb action area
-const FolderCreateButton: React.FC<{ onFolderCreated: () => void }> = ({ onFolderCreated }) => {
+const FolderCreateButton: React.FC<{ onFolderCreated: () => void; createFolderFn?: (name: string) => Promise<JournalFolder> }> = ({ onFolderCreated, createFolderFn }) => {
   const { t } = useTranslation();
   const [creating, setCreating] = useState(false);
   const [folderName, setFolderName] = useState("");
+
+  const doCreateFolder = createFolderFn ?? journalCommands.createFolder;
 
   const handleCreate = async () => {
     const trimmed = folderName.trim();
     if (!trimmed) return;
     try {
-      await journalCommands.createFolder(trimmed);
+      await doCreateFolder(trimmed);
       setFolderName("");
       setCreating(false);
       onFolderCreated();
@@ -126,9 +133,13 @@ type ViewMode =
   | { mode: "detail"; entryId: number; folderId: number; trail: number[]; fromTag?: string }
   | { mode: "tag"; tag: string; folderId: number; trail: number[] }
   | { mode: "search"; query: string }
-  | { mode: "importing"; folderId: number };
+  | { mode: "importing"; folderId: number }
+  | { mode: "youtube-input"; folderId: number };
+
+export type EntrySource = "voice" | "video";
 
 interface JournalSettingsProps {
+  source?: EntrySource;
   selectedEntryId?: number | null;
   selectedFolderId?: number | null;
   onSelectEntry?: (id: number | null) => void;
@@ -136,6 +147,7 @@ interface JournalSettingsProps {
 }
 
 export const JournalSettings: React.FC<JournalSettingsProps> = ({
+  source = "voice",
   selectedEntryId,
   selectedFolderId,
   onSelectEntry,
@@ -146,20 +158,23 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [folders, setFolders] = useState<JournalFolder[]>([]);
 
+  // Select the right commands based on source
+  const cmds = source === "video" ? videoCommands : journalCommands;
+
   const loadData = useCallback(async () => {
     try {
       const [entryData, folderData] = await Promise.all([
-        journalCommands.getEntries(),
-        journalCommands.getFolders(),
+        source === "video" ? videoCommands.getEntries() : journalCommands.getEntries(),
+        source === "video" ? videoCommands.getFolders() : journalCommands.getFolders(),
       ]);
       setEntries(entryData);
       setFolders(folderData);
       return { entries: entryData, folders: folderData };
     } catch (error) {
-      console.error("Failed to load journal data:", error);
+      console.error("Failed to load data:", error);
       return null;
     }
-  }, []);
+  }, [source]);
 
   // Initial load — determine starting view
   useEffect(() => {
@@ -200,6 +215,11 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
       setView({ mode: "folder", folderId: selectedFolderId });
     }
   }, [selectedFolderId]);
+
+  // Processing entries state (for entries being downloaded/imported/transcribed)
+  const processingEntries = useMutterStore((s) => s.processingEntries);
+  const setProcessingEntry = useMutterStore((s) => s.setProcessingEntry);
+  const clearProcessingEntry = useMutterStore((s) => s.clearProcessingEntry);
 
   // React to sidebar search query changes
   const searchQuery = useMutterStore((s) => s.searchQuery);
@@ -271,10 +291,9 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
       return selected ?? null;
     })();
     if (!path) return;
-    setView({ mode: "importing", folderId });
+
     try {
-      const result = await journalCommands.importAudio(path);
-      // Auto-save and go straight to detail view (same as recording stop)
+      // Create a pending entry immediately
       const title = new Date().toLocaleDateString(undefined, {
         year: "numeric",
         month: "long",
@@ -283,9 +302,9 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
         minute: "2-digit",
       });
       const entry = await journalCommands.saveEntry({
-        fileName: result.file_name,
+        fileName: "",
         title,
-        transcriptionText: result.transcription_text,
+        transcriptionText: "",
         postProcessedText: null,
         postProcessPromptId: null,
         tags: [],
@@ -293,9 +312,23 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
         folderId,
       });
       await loadData();
+      setProcessingEntry(entry.id, "importing", 0);
       setView({ mode: "detail", entryId: entry.id, folderId, trail: [] });
+
+      // Import + transcribe in background
+      journalCommands.importAudio(path).then(async (result) => {
+        await journalCommands.updateEntryAfterProcessing(
+          entry.id, result.file_name, title, result.transcription_text
+        );
+        clearProcessingEntry(entry.id);
+        loadData();
+      }).catch((error) => {
+        console.error("Failed to import audio:", error);
+        clearProcessingEntry(entry.id);
+        toast.error(String(error));
+      });
     } catch (error) {
-      console.error("Failed to import audio:", error);
+      console.error("Failed to create entry:", error);
       setView({ mode: "new-entry", folderId });
     }
   };
@@ -350,6 +383,111 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
     setView({ mode: "folder", folderId });
   };
 
+  // --- Video-specific handlers ---
+
+  const handleYouTubeInput = (folderId: number) => {
+    setView({ mode: "youtube-input", folderId });
+  };
+
+  const handleYouTubeSubmit = async (folderId: number, url: string) => {
+    try {
+      // Check if yt-dlp is installed
+      const installed = await videoCommands.checkYtDlpInstalled();
+      if (!installed) {
+        const shouldInstall = await ask(
+          t("settings.video.ytdlpInstallPrompt"),
+          { title: "yt-dlp", kind: "info" }
+        );
+        if (!shouldInstall) {
+          return;
+        }
+        toast.info(t("settings.video.ytdlpInstalling"));
+        await videoCommands.installYtDlp();
+        toast.success(t("settings.video.ytdlpInstalled"));
+      }
+
+      // Create a pending entry immediately so the user sees it
+      const entry = await videoCommands.saveEntry({
+        fileName: "",
+        title: "YouTube Video",
+        transcriptionText: "",
+        source: "youtube",
+        sourceUrl: url,
+        folderId,
+      });
+      await loadData();
+      setProcessingEntry(entry.id, "downloading", 0);
+      setView({ mode: "detail", entryId: entry.id, folderId, trail: [] });
+
+      // Download + transcribe in background
+      videoCommands.downloadYouTubeAudio(url).then(async (result) => {
+        await videoCommands.updateEntryAfterProcessing(
+          entry.id, result.file_name, result.title, result.transcription
+        );
+        clearProcessingEntry(entry.id);
+        loadData();
+      }).catch((error) => {
+        console.error("Failed to download YouTube audio:", error);
+        clearProcessingEntry(entry.id);
+        toast.error(String(error));
+      });
+    } catch (error) {
+      console.error("YouTube submit failed:", error);
+      toast.error(String(error));
+      setView({ mode: "youtube-input", folderId });
+    }
+  };
+
+  const handleImportVideo = async (folderId: number, filePath?: string) => {
+    const path = filePath || await (async () => {
+      const selected = await openFileDialog({
+        multiple: false,
+        filters: [{ name: "Video", extensions: ["mp4", "mov", "mkv", "webm", "m4a", "mp3"] }],
+      });
+      return selected ?? null;
+    })();
+    if (!path) return;
+
+    try {
+      // Create a pending entry immediately
+      const title = new Date().toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      const entry = await videoCommands.saveEntry({
+        fileName: "",
+        title,
+        transcriptionText: "",
+        source: "video",
+        sourceUrl: null,
+        folderId,
+      });
+      await loadData();
+      setProcessingEntry(entry.id, "importing", 0);
+      setView({ mode: "detail", entryId: entry.id, folderId, trail: [] });
+
+      // Import + transcribe in background
+      videoCommands.importVideo(path).then(async (result) => {
+        await videoCommands.updateEntryAfterProcessing(
+          entry.id, result.file_name, title, result.transcription_text
+        );
+        clearProcessingEntry(entry.id);
+        loadData();
+      }).catch((error) => {
+        console.error("Failed to import video:", error);
+        clearProcessingEntry(entry.id);
+        toast.error(String(error));
+      });
+    } catch (error) {
+      console.error("Failed to create video entry:", error);
+      toast.error(String(error));
+      setView({ mode: "new-entry", folderId });
+    }
+  };
+
   const handleSaved = (folderId: number) => {
     setView({ mode: "folder", folderId });
     onSelectEntry?.(null);
@@ -386,7 +524,11 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
 
   if (view.mode === "welcome") {
     return (
-      <WelcomeView onFolderCreated={handleFolderCreated} />
+      <WelcomeView
+        onFolderCreated={handleFolderCreated}
+        source={source}
+        createFolderFn={source === "video" ? videoCommands.createFolder : undefined}
+      />
     );
   }
 
@@ -469,21 +611,24 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
       breadcrumbs.push({ label: t("settings.journal.newEntryTitle") });
     }
     if (view.mode === "importing") {
-      breadcrumbs.push({ label: t("settings.journal.importingAudio") });
+      breadcrumbs.push({ label: source === "video" ? t("settings.video.importingVideo") : t("settings.journal.importingAudio") });
+    }
+    if (view.mode === "youtube-input") {
+      breadcrumbs.push({ label: t("settings.video.youtubeInput") });
     }
   }
 
   // Determine right-side action button
   let actionButton: React.ReactNode = null;
   if (view.mode === "folders") {
-    actionButton = <FolderCreateButton onFolderCreated={handleFolderCreated} />;
+    actionButton = <FolderCreateButton onFolderCreated={handleFolderCreated} createFolderFn={source === "video" ? videoCommands.createFolder : undefined} />;
   } else if (view.mode === "folder") {
     actionButton = (
       <MutterButton
         onClick={() => handleNewEntry(view.folderId)}
         className="flex items-center gap-2"
       >
-        <Mic className="w-4 h-4" />
+        {source === "video" ? <Video className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
         <span>{t("settings.journal.newEntry")}</span>
       </MutterButton>
     );
@@ -533,6 +678,7 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
           entries={entries}
           onOpenFolder={handleOpenFolder}
           onFolderCreated={handleFolderCreated}
+          createFolderFn={source === "video" ? videoCommands.createFolder : undefined}
         />
       )}
       {view.mode === "folder" && (() => {
@@ -543,6 +689,7 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
             folder={folder}
             folders={folders}
             entries={folderEntries}
+            source={source}
             onStartRecording={() => handleNewEntry(view.folderId)}
             onOpenDetail={(entryId) => handleOpenDetail(entryId, view.folderId)}
             onDeleteEntry={async (entryId) => {
@@ -581,11 +728,24 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
           />
         );
       })()}
-      {view.mode === "new-entry" && (
+      {view.mode === "new-entry" && source === "voice" && (
         <NewEntryView
           onRecord={() => handleStartRecording(view.folderId)}
           onImport={(filePath) => handleImportAudio(view.folderId, filePath)}
           onCancel={() => setView({ mode: "folder", folderId: view.folderId })}
+        />
+      )}
+      {view.mode === "new-entry" && source === "video" && (
+        <VideoNewEntryView
+          onYouTube={() => handleYouTubeInput(view.folderId)}
+          onImportVideo={(filePath) => handleImportVideo(view.folderId, filePath)}
+          onCancel={() => setView({ mode: "folder", folderId: view.folderId })}
+        />
+      )}
+      {view.mode === "youtube-input" && (
+        <YouTubeInputView
+          onSubmit={(url) => handleYouTubeSubmit(view.folderId, url)}
+          onCancel={() => setView({ mode: "new-entry", folderId: view.folderId })}
         />
       )}
       {view.mode === "recording" && (
@@ -908,16 +1068,19 @@ const SearchResultsView: React.FC<{
 
 const WelcomeView: React.FC<{
   onFolderCreated: () => void;
-}> = ({ onFolderCreated }) => {
+  source?: EntrySource;
+  createFolderFn?: (name: string) => Promise<JournalFolder>;
+}> = ({ onFolderCreated, source = "voice", createFolderFn }) => {
   const { t } = useTranslation();
   const [creating, setCreating] = useState(false);
   const [folderName, setFolderName] = useState("");
+  const doCreateFolder = createFolderFn ?? journalCommands.createFolder;
 
   const handleCreate = async () => {
     const trimmed = folderName.trim();
     if (!trimmed) return;
     try {
-      await journalCommands.createFolder(trimmed);
+      await doCreateFolder(trimmed);
       setFolderName("");
       setCreating(false);
       onFolderCreated();
@@ -929,12 +1092,18 @@ const WelcomeView: React.FC<{
   return (
     <div className="max-w-md w-full mx-auto flex flex-col items-center justify-center py-16 px-4 text-center gap-6">
       <div className="w-16 h-16 rounded-full bg-mutter-primary/20 flex items-center justify-center">
-        <BookOpen className="w-8 h-8 text-mutter-primary" />
+        {source === "video" ? (
+          <Video className="w-8 h-8 text-mutter-primary" />
+        ) : (
+          <BookOpen className="w-8 h-8 text-mutter-primary" />
+        )}
       </div>
       <div className="space-y-2">
-        <h2 className="text-lg font-semibold">{t("settings.journal.welcome.title")}</h2>
+        <h2 className="text-lg font-semibold">
+          {t(source === "video" ? "settings.video.welcome.title" : "settings.journal.welcome.title")}
+        </h2>
         <p className="text-sm text-text/60 leading-relaxed">
-          {t("settings.journal.welcome.description")}
+          {t(source === "video" ? "settings.video.welcome.description" : "settings.journal.welcome.description")}
         </p>
       </div>
       {creating ? (
@@ -965,7 +1134,7 @@ const WelcomeView: React.FC<{
           className="flex items-center gap-2"
         >
           <FolderPlus className="w-4 h-4" />
-          <span>{t("settings.journal.welcome.createFirstFolder")}</span>
+          <span>{t(source === "video" ? "settings.video.welcome.createFirstFolder" : "settings.journal.welcome.createFirstFolder")}</span>
         </MutterButton>
       )}
     </div>
@@ -979,18 +1148,20 @@ const FoldersView: React.FC<{
   entries: JournalEntry[];
   onOpenFolder: (id: number) => void;
   onFolderCreated: () => void;
-}> = ({ folders, entries, onOpenFolder, onFolderCreated }) => {
+  createFolderFn?: (name: string) => Promise<JournalFolder>;
+}> = ({ folders, entries, onOpenFolder, onFolderCreated, createFolderFn }) => {
   const { t } = useTranslation();
   const [creating, setCreating] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameName, setRenameName] = useState("");
+  const doCreateFolder = createFolderFn ?? journalCommands.createFolder;
 
   const handleCreate = async () => {
     const trimmed = folderName.trim();
     if (!trimmed) return;
     try {
-      await journalCommands.createFolder(trimmed);
+      await doCreateFolder(trimmed);
       setFolderName("");
       setCreating(false);
       onFolderCreated();
@@ -1144,13 +1315,15 @@ const FolderDetailView: React.FC<{
   folder?: JournalFolder;
   folders: JournalFolder[];
   entries: JournalEntry[];
+  source?: EntrySource;
   onStartRecording: () => void;
   onOpenDetail: (entryId: number) => void;
   onDeleteEntry: (entryId: number) => void;
   onDeleteAll: () => void;
   onMoveEntry: (entryId: number, folderId: number | null) => void;
-}> = ({ folder, folders, entries, onStartRecording, onOpenDetail, onDeleteEntry, onDeleteAll, onMoveEntry }) => {
+}> = ({ folder, folders, entries, source = "voice", onStartRecording, onOpenDetail, onDeleteEntry, onDeleteAll, onMoveEntry }) => {
   const { t } = useTranslation();
+  const isVideo = source === "video";
 
   if (!folder) return null;
 
@@ -1159,16 +1332,16 @@ const FolderDetailView: React.FC<{
       {entries.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 text-center gap-4">
           <div className="w-12 h-12 rounded-full bg-mutter-primary/10 flex items-center justify-center">
-            <Mic className="w-6 h-6 text-mutter-primary/60" />
+            {isVideo ? <Video className="w-6 h-6 text-mutter-primary/60" /> : <Mic className="w-6 h-6 text-mutter-primary/60" />}
           </div>
           <p className="text-sm text-text/50">
-            {t("settings.journal.folders.emptyFolder")}
+            {isVideo ? t("settings.journal.folders.emptyFolderVideo") : t("settings.journal.folders.emptyFolder")}
           </p>
           <MutterButton
             onClick={onStartRecording}
             className="flex items-center gap-2"
           >
-            <Mic className="w-4 h-4" />
+            {isVideo ? <Video className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
             <span>{t("settings.journal.newEntry")}</span>
           </MutterButton>
         </div>
@@ -1750,6 +1923,8 @@ const DetailView: React.FC<{
   const { settings } = useSettings();
   const osType = useOsType();
   const promptOverrides = useMutterStore((s) => s.promptOverrides);
+  const processingInfo = useMutterStore((s) => s.processingEntries[entryId]);
+  const setProcessingEntry = useMutterStore((s) => s.setProcessingEntry);
 
   const activeProviderId = settings?.post_process_provider_id ?? "";
   const activeModelName = activeProviderId ? (settings?.post_process_models?.[activeProviderId] ?? "") : "";
@@ -1846,6 +2021,35 @@ const DetailView: React.FC<{
     loadEntry();
     loadChatSessions();
   }, [loadEntry, loadChatSessions]);
+
+  // Listen for processing events to update progress in the store
+  useEffect(() => {
+    if (!processingInfo) return;
+    let unlistenProgress: (() => void) | undefined;
+    let unlistenStatus: (() => void) | undefined;
+
+    const setup = async () => {
+      unlistenProgress = await listen<number>("ytdlp-audio-progress", (event) => {
+        setProcessingEntry(entryId, "downloading", Math.round(event.payload));
+      });
+      unlistenStatus = await listen<string>("ytdlp-status", (event) => {
+        setProcessingEntry(entryId, event.payload, 0);
+      });
+    };
+    setup();
+
+    return () => {
+      unlistenProgress?.();
+      unlistenStatus?.();
+    };
+  }, [entryId, !!processingInfo]);
+
+  // Reload entry when processing completes (entry gets updated by backend)
+  useEffect(() => {
+    if (!processingInfo) {
+      loadEntry();
+    }
+  }, [processingInfo, loadEntry]);
 
   // Save helper — persists current field values
   const saveFields = useCallback(async (
@@ -2413,8 +2617,34 @@ ${linkedEntryDetails}` : ""}`;
             )}
           </div>
 
+          {/* Processing overlay */}
+          {processingInfo && (
+            <div className="bg-mutter-primary/5 border border-mutter-primary/20 rounded-lg p-6 flex flex-col items-center gap-3">
+              <Loader2 className="w-6 h-6 text-mutter-primary animate-spin" />
+              <p className="text-sm font-medium text-text/70">
+                {processingInfo.status === "downloading" && processingInfo.progress > 0
+                  ? t("settings.video.downloadingAudio", { progress: processingInfo.progress })
+                  : processingInfo.status === "extracting"
+                    ? t("settings.video.extractingAudio")
+                    : processingInfo.status === "transcribing"
+                      ? t("settings.video.transcribingAudio")
+                      : t("settings.video.processing")}
+              </p>
+              <div className="w-full max-w-xs bg-mid-gray/10 rounded-full h-1.5 overflow-hidden">
+                {processingInfo.status === "downloading" && processingInfo.progress > 0 ? (
+                  <div
+                    className="h-full bg-mutter-primary rounded-full transition-all duration-300"
+                    style={{ width: `${processingInfo.progress}%` }}
+                  />
+                ) : (
+                  <div className="h-full bg-mutter-primary/60 rounded-full animate-pulse w-full" />
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Transcription */}
-          <div>
+          {!processingInfo && <div>
             <div className="flex items-center justify-between">
               <label className="text-xs font-medium text-text/60 uppercase tracking-wide">
                 {t("settings.journal.transcription")}
@@ -2427,7 +2657,9 @@ ${linkedEntryDetails}` : ""}`;
                 {showCopied ? <Check width={14} height={14} /> : <Copy width={14} height={14} />}
               </button>
             </div>
-            <AudioPlayer onLoadRequest={getAudioUrl} className="w-full mt-1" />
+            {entry.file_name && (
+              <AudioPlayer onLoadRequest={getAudioUrl} className="w-full mt-1" />
+            )}
             {isEditingTranscription ? (
               <textarea
                 autoFocus
@@ -2507,7 +2739,7 @@ ${linkedEntryDetails}` : ""}`;
                 );
               })()}
             </div>
-          </div>
+          </div>}
 
         </div>
 
@@ -3066,6 +3298,7 @@ const JournalEntryCard: React.FC<{
   const pickerRef = useRef<HTMLDivElement>(null);
   const folderSearchRef = useRef<HTMLInputElement>(null);
   const setPanelDragEntryId = useMutterStore((s) => s.setPanelDragEntryId);
+  const isProcessing = useMutterStore((s) => !!s.processingEntries[entry.id]);
   const dragMouseRef = useRef<{ x: number; y: number } | null>(null);
   const isDraggingRef = useRef(false);
 
@@ -3126,10 +3359,13 @@ const JournalEntryCard: React.FC<{
     >
       <div className="flex justify-between items-start gap-2">
         <div className="min-w-0 flex-1">
-          <h4 className="text-sm font-medium truncate">{entry.title}</h4>
+          <div className="flex items-center gap-1.5">
+            {isProcessing && <Loader2 className="w-3.5 h-3.5 text-mutter-primary animate-spin shrink-0" />}
+            <h4 className="text-sm font-medium truncate">{entry.title}</h4>
+          </div>
           <p className="text-xs text-text/50 mt-0.5">{formattedDate}</p>
           <p className="text-xs text-text/70 mt-1 line-clamp-2">
-            {entry.transcription_text}
+            {isProcessing ? t("settings.video.processing") : entry.transcription_text}
           </p>
           {entry.tags.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-1.5">
@@ -3210,3 +3446,160 @@ const JournalEntryCard: React.FC<{
     </div>
   );
 };
+
+// --- Video New Entry View (choose YouTube or Import Video) ---
+
+const VideoNewEntryView: React.FC<{
+  onYouTube: () => void;
+  onImportVideo: (filePath?: string) => void;
+  onCancel: () => void;
+}> = ({ onYouTube, onImportVideo, onCancel }) => {
+  const { t } = useTranslation();
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    const setup = async () => {
+      const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+      unlisten = await getCurrentWebview().onDragDropEvent((event) => {
+        if (event.payload.type === "enter" || event.payload.type === "over") {
+          setIsDragOver(true);
+        } else if (event.payload.type === "drop") {
+          setIsDragOver(false);
+          const paths = event.payload.paths;
+          if (paths.length > 0) {
+            const filePath = paths[0];
+            if (/\.(mp4|mov|mkv|webm|m4a|mp3)$/i.test(filePath)) {
+              setIsImporting(true);
+              onImportVideo(filePath);
+            }
+          }
+        } else {
+          setIsDragOver(false);
+        }
+      });
+    };
+    setup();
+    return () => { unlisten?.(); };
+  }, [onImportVideo]);
+
+  return (
+    <div className="px-4">
+      <div className={`bg-background border rounded-lg p-8 flex flex-col items-center gap-6 transition-colors ${
+        isDragOver ? "border-mutter-primary bg-mutter-primary/5" : "border-mid-gray/20"
+      }`}>
+        <div className="flex gap-4 w-full max-w-md">
+          {/* YouTube option */}
+          <button
+            onClick={onYouTube}
+            disabled={isImporting}
+            className="flex-1 flex flex-col items-center gap-3 p-6 rounded-lg border-2 border-dashed border-mid-gray/20 hover:border-red-400/50 hover:bg-red-500/5 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <div className="w-14 h-14 rounded-full bg-red-500/15 flex items-center justify-center">
+              <Youtube className="w-7 h-7 text-red-500" />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium">{t("settings.video.youtube")}</p>
+              <p className="text-[10px] text-text/40 mt-1">{t("settings.video.youtubeDesc")}</p>
+            </div>
+          </button>
+
+          {/* Import Video option */}
+          <button
+            onClick={() => { setIsImporting(true); onImportVideo(); }}
+            disabled={isImporting}
+            className={`flex-1 flex flex-col items-center gap-3 p-6 rounded-lg border-2 border-dashed transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
+              isDragOver
+                ? "border-mutter-primary bg-mutter-primary/10"
+                : "border-mid-gray/20 hover:border-mutter-primary/50 hover:bg-mutter-primary/5"
+            }`}
+          >
+            <div className="w-14 h-14 rounded-full bg-mutter-primary/15 flex items-center justify-center">
+              {isImporting ? (
+                <div className="w-7 h-7 border-2 border-mutter-primary/30 border-t-mutter-primary rounded-full animate-spin" />
+              ) : (
+                <Video className="w-7 h-7 text-mutter-primary" />
+              )}
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium">
+                {isImporting ? t("settings.video.importingVideo") : t("settings.video.importVideo")}
+              </p>
+              <p className="text-[10px] text-text/40 mt-1">{t("settings.video.importVideoDesc")}</p>
+            </div>
+          </button>
+        </div>
+
+        <button
+          onClick={onCancel}
+          className="text-xs text-text/40 hover:text-text/60 cursor-pointer"
+        >
+          {t("common.cancel")}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// --- YouTube URL Input View ---
+
+const YouTubeInputView: React.FC<{
+  onSubmit: (url: string) => void;
+  onCancel: () => void;
+}> = ({ onSubmit, onCancel }) => {
+  const { t } = useTranslation();
+  const [url, setUrl] = useState("");
+
+  const handleSubmit = () => {
+    const trimmed = url.trim();
+    if (!trimmed) return;
+    onSubmit(trimmed);
+  };
+
+  return (
+    <div className="px-4">
+      <div className="bg-background border border-mid-gray/20 rounded-lg p-8 flex flex-col items-center gap-6 max-w-md mx-auto">
+        <div className="w-16 h-16 rounded-full bg-red-500/15 flex items-center justify-center">
+          <Youtube className="w-8 h-8 text-red-500" />
+        </div>
+        <div className="text-center space-y-1">
+          <h3 className="text-sm font-semibold">{t("settings.video.youtubeInput")}</h3>
+          <p className="text-xs text-text/50">{t("settings.video.youtubeInputDesc")}</p>
+        </div>
+        <div className="w-full space-y-3">
+          <input
+            autoFocus
+            type="text"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleSubmit();
+              if (e.key === "Escape") onCancel();
+            }}
+            placeholder="https://www.youtube.com/watch?v=..."
+            className="w-full px-3 py-2 bg-background border border-mid-gray/20 rounded-md text-sm focus:outline-none focus:border-mutter-primary"
+          />
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={onCancel}
+              className="px-3 py-1.5 text-xs text-text/60 hover:text-text/80 rounded-md hover:bg-mid-gray/10 cursor-pointer"
+            >
+              {t("common.cancel")}
+            </button>
+            <MutterButton
+              onClick={handleSubmit}
+              disabled={!url.trim()}
+              size="sm"
+              className="flex items-center gap-1.5"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              {t("settings.video.fetchTranscript")}
+            </MutterButton>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
