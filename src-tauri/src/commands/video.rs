@@ -1,4 +1,6 @@
-use crate::managers::journal::{JournalEntry, JournalFolder, JournalManager, JournalRecordingResult};
+use crate::managers::journal::{
+    JournalEntry, JournalFolder, JournalManager, JournalRecordingResult,
+};
 use crate::managers::transcription::TranscriptionManager;
 use log::{debug, info};
 use std::sync::Arc;
@@ -6,7 +8,7 @@ use tauri::{AppHandle, Emitter, State};
 
 /// Transcribe audio in chunks to avoid ORT errors with long audio.
 /// Splits into 30-second segments at 16kHz (480,000 samples).
-fn transcribe_chunked(
+pub fn transcribe_chunked(
     transcription_manager: &TranscriptionManager,
     samples: Vec<f32>,
 ) -> Result<String, String> {
@@ -71,7 +73,10 @@ pub async fn download_youtube_audio(
     journal_manager: State<'_, Arc<JournalManager>>,
     transcription_manager: State<'_, Arc<TranscriptionManager>>,
 ) -> Result<YouTubeDownloadResult, String> {
-    info!("[yt-dl] Step 1: Starting YouTube audio download for: {}", url);
+    info!(
+        "[yt-dl] Step 1: Starting YouTube audio download for: {}",
+        url
+    );
 
     // Get video title
     let _ = app.emit("ytdlp-status", "fetching-title");
@@ -203,8 +208,8 @@ fn extract_audio_from_video(file_path: &str) -> Result<(Vec<f32>, u32), String> 
     use symphonia::core::meta::MetadataOptions;
     use symphonia::core::probe::Hint;
 
-    let file = std::fs::File::open(file_path)
-        .map_err(|e| format!("Failed to open video file: {}", e))?;
+    let file =
+        std::fs::File::open(file_path).map_err(|e| format!("Failed to open video file: {}", e))?;
 
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
 
@@ -223,7 +228,12 @@ fn extract_audio_from_video(file_path: &str) -> Result<(Vec<f32>, u32), String> 
             &FormatOptions::default(),
             &MetadataOptions::default(),
         )
-        .map_err(|e| format!("Unsupported video format: {}. Supported formats: MP4, MKV, WebM, MP3.", e))?;
+        .map_err(|e| {
+            format!(
+                "Unsupported video format: {}. Supported formats: MP4, MKV, WebM, MP3.",
+                e
+            )
+        })?;
 
     let mut format = probed.format;
 
@@ -349,9 +359,7 @@ pub async fn import_video_for_journal(
     // Save as 16kHz mono WAV in journal recordings dir
     let timestamp = chrono::Utc::now().timestamp();
     let file_name = format!("mutter-video-{}.wav", timestamp);
-    let dest_path = journal_manager
-        .effective_recordings_dir()
-        .join(&file_name);
+    let dest_path = journal_manager.effective_recordings_dir().join(&file_name);
 
     crate::audio_toolkit::save_wav_file(dest_path, &samples_for_wav)
         .await

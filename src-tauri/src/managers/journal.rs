@@ -56,6 +56,21 @@ static MIGRATIONS: &[M] = &[
         ALTER TABLE journal_entries ADD COLUMN source_url TEXT;
         ALTER TABLE journal_folders ADD COLUMN source TEXT NOT NULL DEFAULT 'voice';",
     ),
+    M::up(
+        "CREATE TABLE IF NOT EXISTS meeting_segments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_id INTEGER NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
+            speaker INTEGER,
+            start_ms INTEGER NOT NULL,
+            end_ms INTEGER NOT NULL,
+            text TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_meeting_segments_entry ON meeting_segments(entry_id);
+        ALTER TABLE journal_entries ADD COLUMN speaker_names TEXT NOT NULL DEFAULT '{}';",
+    ),
+    M::up(
+        "ALTER TABLE journal_entries ADD COLUMN user_source TEXT NOT NULL DEFAULT '';",
+    ),
 ];
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -73,6 +88,8 @@ pub struct JournalEntry {
     pub transcript_snapshots: Vec<String>,
     pub source: String,
     pub source_url: Option<String>,
+    pub speaker_names: String,
+    pub user_source: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
@@ -148,9 +165,7 @@ fn unique_path(dir: &Path, base: &str, ext: &str) -> PathBuf {
 
 /// Extract base name from a file_name (strip the extension).
 fn entry_base_name(file_name: &str) -> &str {
-    file_name
-        .strip_suffix(".wav")
-        .unwrap_or(file_name)
+    file_name.strip_suffix(".wav").unwrap_or(file_name)
 }
 
 /// Capitalize first letter of a string.
@@ -208,8 +223,7 @@ impl JournalManager {
 
         migrations.to_latest(&mut conn)?;
 
-        let version_after: i32 =
-            conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        let version_after: i32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
 
         if version_after > version_before {
             info!(
@@ -243,7 +257,10 @@ impl JournalManager {
                 if p.exists() || fs::create_dir_all(&p).is_ok() {
                     return p;
                 }
-                warn!("Configured journal storage path {:?} is invalid, using default", path);
+                warn!(
+                    "Configured journal storage path {:?} is invalid, using default",
+                    path
+                );
             }
         }
         self.recordings_dir.clone()
@@ -270,7 +287,10 @@ impl JournalManager {
     /// Write the transcript markdown file for an entry.
     fn write_transcript_md(&self, entry: &JournalEntry) {
         if let Err(e) = self._write_transcript_md(entry) {
-            error!("Failed to write transcript .md for entry {}: {}", entry.id, e);
+            error!(
+                "Failed to write transcript .md for entry {}: {}",
+                entry.id, e
+            );
         }
     }
 
@@ -285,13 +305,23 @@ impl JournalManager {
     }
 
     /// Write a chat session's messages to a markdown file.
-    pub fn write_chat_md(&self, entry: &JournalEntry, session: &ChatSession, messages: &[ChatMessage]) {
+    pub fn write_chat_md(
+        &self,
+        entry: &JournalEntry,
+        session: &ChatSession,
+        messages: &[ChatMessage],
+    ) {
         if let Err(e) = self._write_chat_md(entry, session, messages) {
             error!("Failed to write chat .md for session {}: {}", session.id, e);
         }
     }
 
-    fn _write_chat_md(&self, entry: &JournalEntry, session: &ChatSession, messages: &[ChatMessage]) -> Result<()> {
+    fn _write_chat_md(
+        &self,
+        entry: &JournalEntry,
+        session: &ChatSession,
+        messages: &[ChatMessage],
+    ) -> Result<()> {
         let dir = self.resolve_entry_dir(entry.folder_id)?;
         let base = entry_base_name(&entry.file_name);
         let session_title = if session.title.is_empty() {
@@ -310,7 +340,10 @@ impl JournalManager {
             format!("{} - {} - {}.md", base, prefix, session_title)
         } else {
             let mode_cap = capitalize_first(&session.mode);
-            format!("{} - {} - {} - {}.md", base, prefix, mode_cap, session_title)
+            format!(
+                "{} - {} - {} - {}.md",
+                base, prefix, mode_cap, session_title
+            )
         };
         let md_path = dir.join(&filename);
 
@@ -336,7 +369,10 @@ impl JournalManager {
     /// Delete the chat/jot markdown file for a session.
     fn delete_chat_md(&self, entry: &JournalEntry, session: &ChatSession) {
         if let Err(e) = self._delete_chat_md(entry, session) {
-            error!("Failed to delete chat .md for session {}: {}", session.id, e);
+            error!(
+                "Failed to delete chat .md for session {}: {}",
+                session.id, e
+            );
         }
     }
 
@@ -366,11 +402,7 @@ impl JournalManager {
 
     /// Rename all files for an entry when its title changes.
     /// Returns the new file_name (for the audio file).
-    fn rename_entry_files(
-        &self,
-        entry: &JournalEntry,
-        new_title: &str,
-    ) -> Result<String> {
+    fn rename_entry_files(&self, entry: &JournalEntry, new_title: &str) -> Result<String> {
         let dir = self.resolve_entry_dir(entry.folder_id)?;
         let old_base = entry_base_name(&entry.file_name);
         let new_base = sanitize_filename(new_title);
@@ -381,7 +413,11 @@ impl JournalManager {
 
         // Rename audio file
         let new_wav_path = unique_path(&dir, &new_base, ".wav");
-        let new_wav_name = new_wav_path.file_name().unwrap().to_string_lossy().to_string();
+        let new_wav_name = new_wav_path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string();
         let old_wav_path = dir.join(&entry.file_name);
         if old_wav_path.exists() {
             fs::rename(&old_wav_path, &new_wav_path)?;
@@ -526,7 +562,10 @@ impl JournalManager {
 
         // Recursively copy contents from old to new
         Self::copy_dir_recursive(&old_dir, &new_dir)?;
-        info!("Migrated journal storage from {:?} to {:?}", old_dir, new_dir);
+        info!(
+            "Migrated journal storage from {:?} to {:?}",
+            old_dir, new_dir
+        );
         Ok(())
     }
 
@@ -588,11 +627,18 @@ impl JournalManager {
         folder_id: Option<i64>,
     ) -> Result<JournalEntry> {
         self.save_entry_with_source(
-            file_name, title, transcription_text,
-            post_processed_text, post_process_prompt_id,
-            tags, linked_entry_ids, folder_id,
-            "voice".to_string(), None,
-        ).await
+            file_name,
+            title,
+            transcription_text,
+            post_processed_text,
+            post_process_prompt_id,
+            tags,
+            linked_entry_ids,
+            folder_id,
+            "voice".to_string(),
+            None,
+        )
+        .await
     }
 
     pub async fn save_entry_with_source(
@@ -630,9 +676,16 @@ impl JournalManager {
 
         let new_file_name = if !file_name.is_empty() && src_path.is_file() {
             let new_wav_path = unique_path(&dest_dir, &sanitized, ".wav");
-            let name = new_wav_path.file_name().unwrap().to_string_lossy().to_string();
+            let name = new_wav_path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .to_string();
             fs::rename(&src_path, &new_wav_path)?;
-            debug!("Renamed audio to title-based: {:?} -> {:?}", src_path, new_wav_path);
+            debug!(
+                "Renamed audio to title-based: {:?} -> {:?}",
+                src_path, new_wav_path
+            );
             name
         } else {
             // No audio file (e.g. pending entry or YouTube transcript) — use sanitized title as file_name
@@ -662,6 +715,8 @@ impl JournalManager {
             transcript_snapshots: vec![],
             source,
             source_url,
+            speaker_names: "{}".to_string(),
+            user_source: String::new(),
         };
 
         // Write transcript markdown file
@@ -696,6 +751,8 @@ impl JournalManager {
             transcript_snapshots,
             source: row.get("source")?,
             source_url: row.get("source_url")?,
+            speaker_names: row.get("speaker_names")?,
+            user_source: row.get("user_source")?,
         })
     }
 
@@ -704,14 +761,17 @@ impl JournalManager {
         self.get_entries_by_source(None).await
     }
 
-    pub async fn get_entries_by_source(&self, source_filter: Option<&str>) -> Result<Vec<JournalEntry>> {
+    pub async fn get_entries_by_source(
+        &self,
+        source_filter: Option<&str>,
+    ) -> Result<Vec<JournalEntry>> {
         let conn = self.get_connection()?;
         let mut entries = Vec::new();
 
         match source_filter {
             Some(source) => {
                 let mut stmt = conn.prepare(
-                    "SELECT id, file_name, timestamp, title, transcription_text, post_processed_text, post_process_prompt_id, tags, linked_entry_ids, folder_id, transcript_snapshots, source, source_url FROM journal_entries WHERE source = ?1 ORDER BY timestamp DESC",
+                    "SELECT id, file_name, timestamp, title, transcription_text, post_processed_text, post_process_prompt_id, tags, linked_entry_ids, folder_id, transcript_snapshots, source, source_url, speaker_names, user_source FROM journal_entries WHERE source = ?1 ORDER BY timestamp DESC",
                 )?;
                 let rows = stmt.query_map([source], |row| Self::parse_entry_row(row))?;
                 for row in rows {
@@ -720,7 +780,7 @@ impl JournalManager {
             }
             None => {
                 let mut stmt = conn.prepare(
-                    "SELECT id, file_name, timestamp, title, transcription_text, post_processed_text, post_process_prompt_id, tags, linked_entry_ids, folder_id, transcript_snapshots, source, source_url FROM journal_entries ORDER BY timestamp DESC",
+                    "SELECT id, file_name, timestamp, title, transcription_text, post_processed_text, post_process_prompt_id, tags, linked_entry_ids, folder_id, transcript_snapshots, source, source_url, speaker_names, user_source FROM journal_entries ORDER BY timestamp DESC",
                 )?;
                 let rows = stmt.query_map([], |row| Self::parse_entry_row(row))?;
                 for row in rows {
@@ -735,7 +795,7 @@ impl JournalManager {
     pub async fn get_entry_by_id(&self, id: i64) -> Result<Option<JournalEntry>> {
         let conn = self.get_connection()?;
         let mut stmt = conn.prepare(
-            "SELECT id, file_name, timestamp, title, transcription_text, post_processed_text, post_process_prompt_id, tags, linked_entry_ids, folder_id, transcript_snapshots, source, source_url FROM journal_entries WHERE id = ?1",
+            "SELECT id, file_name, timestamp, title, transcription_text, post_processed_text, post_process_prompt_id, tags, linked_entry_ids, folder_id, transcript_snapshots, source, source_url, speaker_names, user_source FROM journal_entries WHERE id = ?1",
         )?;
 
         let entry = stmt
@@ -752,6 +812,7 @@ impl JournalManager {
         tags: Vec<String>,
         linked_entry_ids: Vec<i64>,
         folder_id: Option<i64>,
+        user_source: String,
     ) -> Result<()> {
         let mut file_name_update: Option<String> = None;
 
@@ -780,13 +841,13 @@ impl JournalManager {
 
         if let Some(ref new_fn) = file_name_update {
             conn.execute(
-                "UPDATE journal_entries SET title = ?1, tags = ?2, linked_entry_ids = ?3, folder_id = ?4, file_name = ?5 WHERE id = ?6",
-                params![title, tags_json, linked_json, folder_id, new_fn, id],
+                "UPDATE journal_entries SET title = ?1, tags = ?2, linked_entry_ids = ?3, folder_id = ?4, file_name = ?5, user_source = ?6 WHERE id = ?7",
+                params![title, tags_json, linked_json, folder_id, new_fn, user_source, id],
             )?;
         } else {
             conn.execute(
-                "UPDATE journal_entries SET title = ?1, tags = ?2, linked_entry_ids = ?3, folder_id = ?4 WHERE id = ?5",
-                params![title, tags_json, linked_json, folder_id, id],
+                "UPDATE journal_entries SET title = ?1, tags = ?2, linked_entry_ids = ?3, folder_id = ?4, user_source = ?5 WHERE id = ?6",
+                params![title, tags_json, linked_json, folder_id, user_source, id],
             )?;
         }
 
@@ -900,7 +961,10 @@ impl JournalManager {
             params![new_text, prompt_id, snapshots_json, id],
         )?;
 
-        debug!("Applied prompt {} to journal entry {} (snapshot saved)", prompt_id, id);
+        debug!(
+            "Applied prompt {} to journal entry {} (snapshot saved)",
+            prompt_id, id
+        );
 
         // Update the transcript .md file
         if let Ok(Some(updated)) = self.get_entry_by_id(id).await {
@@ -968,10 +1032,7 @@ impl JournalManager {
         }
 
         let conn = self.get_connection()?;
-        conn.execute(
-            "DELETE FROM journal_entries WHERE id = ?1",
-            params![id],
-        )?;
+        conn.execute("DELETE FROM journal_entries WHERE id = ?1", params![id])?;
 
         debug!("Deleted journal entry with id: {}", id);
 
@@ -1008,10 +1069,15 @@ impl JournalManager {
     // and move_all_entry_files handles folder moves.
 
     pub async fn create_folder(&self, name: String) -> Result<JournalFolder> {
-        self.create_folder_with_source(name, "voice".to_string()).await
+        self.create_folder_with_source(name, "voice".to_string())
+            .await
     }
 
-    pub async fn create_folder_with_source(&self, name: String, source: String) -> Result<JournalFolder> {
+    pub async fn create_folder_with_source(
+        &self,
+        name: String,
+        source: String,
+    ) -> Result<JournalFolder> {
         let created_at = Utc::now().timestamp();
 
         // Create actual directory
@@ -1028,7 +1094,10 @@ impl JournalManager {
             params![name, created_at, source],
         )?;
         let id = conn.last_insert_rowid();
-        debug!("Created journal folder {} ('{}', source={})", id, name, source);
+        debug!(
+            "Created journal folder {} ('{}', source={})",
+            id, name, source
+        );
 
         if let Err(e) = self.app_handle.emit("journal-updated", ()) {
             error!("Failed to emit journal-updated event: {}", e);
@@ -1092,10 +1161,7 @@ impl JournalManager {
             debug!("Removed journal folder directory: {:?}", folder_path);
         }
 
-        conn.execute(
-            "DELETE FROM journal_folders WHERE id = ?1",
-            params![id],
-        )?;
+        conn.execute("DELETE FROM journal_folders WHERE id = ?1", params![id])?;
         debug!("Deleted journal folder {}", id);
 
         if let Err(e) = self.app_handle.emit("journal-updated", ()) {
@@ -1110,7 +1176,10 @@ impl JournalManager {
         self.get_folders_by_source(None).await
     }
 
-    pub async fn get_folders_by_source(&self, source_filter: Option<&str>) -> Result<Vec<JournalFolder>> {
+    pub async fn get_folders_by_source(
+        &self,
+        source_filter: Option<&str>,
+    ) -> Result<Vec<JournalFolder>> {
         let conn = self.get_connection()?;
         let mut folders = Vec::new();
 
@@ -1152,11 +1221,7 @@ impl JournalManager {
         Ok(folders)
     }
 
-    pub async fn move_entry_to_folder(
-        &self,
-        entry_id: i64,
-        folder_id: Option<i64>,
-    ) -> Result<()> {
+    pub async fn move_entry_to_folder(&self, entry_id: i64, folder_id: Option<i64>) -> Result<()> {
         let entry = self
             .get_entry_by_id(entry_id)
             .await?
@@ -1175,10 +1240,7 @@ impl JournalManager {
             params![folder_id, entry_id],
         )?;
 
-        debug!(
-            "Moved journal entry {} to folder {:?}",
-            entry_id, folder_id
-        );
+        debug!("Moved journal entry {} to folder {:?}", entry_id, folder_id);
 
         if let Err(e) = self.app_handle.emit("journal-updated", ()) {
             error!("Failed to emit journal-updated event: {}", e);
@@ -1189,11 +1251,7 @@ impl JournalManager {
 
     // --- Chat session operations ---
 
-    pub async fn create_chat_session(
-        &self,
-        entry_id: i64,
-        mode: String,
-    ) -> Result<ChatSession> {
+    pub async fn create_chat_session(&self, entry_id: i64, mode: String) -> Result<ChatSession> {
         let now = Utc::now().timestamp();
         let conn = self.get_connection()?;
         conn.execute(
@@ -1213,10 +1271,7 @@ impl JournalManager {
         })
     }
 
-    pub async fn get_chat_sessions_for_entry(
-        &self,
-        entry_id: i64,
-    ) -> Result<Vec<ChatSession>> {
+    pub async fn get_chat_sessions_for_entry(&self, entry_id: i64) -> Result<Vec<ChatSession>> {
         let conn = self.get_connection()?;
         let mut stmt = conn.prepare(
             "SELECT id, entry_id, mode, title, created_at, updated_at FROM journal_chat_sessions WHERE entry_id = ?1 ORDER BY updated_at DESC",
@@ -1329,10 +1384,7 @@ impl JournalManager {
         }
     }
 
-    pub async fn get_chat_messages(
-        &self,
-        session_id: i64,
-    ) -> Result<Vec<ChatMessage>> {
+    pub async fn get_chat_messages(&self, session_id: i64) -> Result<Vec<ChatMessage>> {
         let conn = self.get_connection()?;
         let mut stmt = conn.prepare(
             "SELECT id, session_id, role, content, created_at FROM journal_chat_messages WHERE session_id = ?1 ORDER BY created_at ASC",
@@ -1374,7 +1426,14 @@ impl JournalManager {
         if let Some((entry_id, mode, old_title)) = old_info {
             if old_title != title {
                 if let Ok(Some(entry)) = self.get_entry_by_id(entry_id).await {
-                    let old_session = ChatSession { id: session_id, entry_id, mode: mode.clone(), title: old_title, created_at: 0, updated_at: 0 };
+                    let old_session = ChatSession {
+                        id: session_id,
+                        entry_id,
+                        mode: mode.clone(),
+                        title: old_title,
+                        created_at: 0,
+                        updated_at: 0,
+                    };
                     self.delete_chat_md(&entry, &old_session);
                     // Rewrite with new title
                     self.write_chat_md_for_session(session_id).await;
@@ -1406,11 +1465,121 @@ impl JournalManager {
         // Delete the .md file
         if let Some((entry_id, mode, title)) = session_info {
             if let Ok(Some(entry)) = self.get_entry_by_id(entry_id).await {
-                let session = ChatSession { id: session_id, entry_id, mode, title, created_at: 0, updated_at: 0 };
+                let session = ChatSession {
+                    id: session_id,
+                    entry_id,
+                    mode,
+                    title,
+                    created_at: 0,
+                    updated_at: 0,
+                };
                 self.delete_chat_md(&entry, &session);
             }
         }
 
         Ok(())
+    }
+
+    // --- Meeting segment operations ---
+
+    pub async fn save_meeting_segments(
+        &self,
+        entry_id: i64,
+        segments: &[crate::diarize::DiarizedSegment],
+    ) -> Result<()> {
+        let conn = self.get_connection()?;
+
+        // Clear existing segments for this entry
+        conn.execute(
+            "DELETE FROM meeting_segments WHERE entry_id = ?1",
+            params![entry_id],
+        )?;
+
+        for seg in segments {
+            conn.execute(
+                "INSERT INTO meeting_segments (entry_id, speaker, start_ms, end_ms, text) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![entry_id, seg.speaker, seg.start_ms, seg.end_ms, seg.text],
+            )?;
+        }
+
+        debug!(
+            "Saved {} meeting segments for entry {}",
+            segments.len(),
+            entry_id
+        );
+        Ok(())
+    }
+
+    pub async fn get_meeting_segments(
+        &self,
+        entry_id: i64,
+    ) -> Result<Vec<crate::diarize::DiarizedSegment>> {
+        let conn = self.get_connection()?;
+        let mut stmt = conn.prepare(
+            "SELECT speaker, start_ms, end_ms, text FROM meeting_segments WHERE entry_id = ?1 ORDER BY start_ms ASC",
+        )?;
+        let rows = stmt.query_map([entry_id], |row| {
+            Ok(crate::diarize::DiarizedSegment {
+                speaker: row.get(0)?,
+                start_ms: row.get(1)?,
+                end_ms: row.get(2)?,
+                text: row.get(3)?,
+            })
+        })?;
+        let mut segments = Vec::new();
+        for row in rows {
+            segments.push(row?);
+        }
+        Ok(segments)
+    }
+
+    pub async fn update_speaker_name(
+        &self,
+        entry_id: i64,
+        speaker_id: i32,
+        name: String,
+    ) -> Result<()> {
+        let conn = self.get_connection()?;
+        let current: String = conn.query_row(
+            "SELECT speaker_names FROM journal_entries WHERE id = ?1",
+            [entry_id],
+            |row| row.get(0),
+        )?;
+
+        let mut names: std::collections::HashMap<String, String> =
+            serde_json::from_str(&current).unwrap_or_default();
+        names.insert(speaker_id.to_string(), name);
+        let updated = serde_json::to_string(&names)?;
+
+        conn.execute(
+            "UPDATE journal_entries SET speaker_names = ?1 WHERE id = ?2",
+            params![updated, entry_id],
+        )?;
+
+        debug!(
+            "Updated speaker name for entry {} speaker {}",
+            entry_id, speaker_id
+        );
+
+        if let Err(e) = self.app_handle.emit("journal-updated", ()) {
+            error!("Failed to emit journal-updated event: {}", e);
+        }
+
+        Ok(())
+    }
+
+    pub async fn get_speaker_names(
+        &self,
+        entry_id: i64,
+    ) -> Result<std::collections::HashMap<String, String>> {
+        let conn = self.get_connection()?;
+        let json: String = conn.query_row(
+            "SELECT speaker_names FROM journal_entries WHERE id = ?1",
+            [entry_id],
+            |row| row.get(0),
+        )?;
+        let names: std::collections::HashMap<String, String> =
+            serde_json::from_str(&json).unwrap_or_default();
+        Ok(names)
     }
 }

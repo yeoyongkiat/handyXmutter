@@ -6,6 +6,7 @@ pub mod audio_toolkit;
 pub mod cli;
 mod clipboard;
 mod commands;
+pub mod diarize;
 mod helpers;
 mod input;
 mod llm_client;
@@ -392,6 +393,17 @@ pub fn run(cli_args: CliArgs) {
         commands::video::get_video_folders,
         commands::video::create_video_folder,
         commands::video::save_video_entry,
+        commands::meeting::check_diarize_models_installed,
+        commands::meeting::install_diarize_models,
+        commands::meeting::get_meeting_entries,
+        commands::meeting::get_meeting_folders,
+        commands::meeting::create_meeting_folder,
+        commands::meeting::save_meeting_entry,
+        commands::meeting::transcribe_meeting,
+        commands::meeting::get_meeting_segments,
+        commands::meeting::update_meeting_speaker_name,
+        commands::meeting::get_meeting_speaker_names,
+        commands::meeting::diarize_entry,
         helpers::clamshell::is_laptop,
     ]);
 

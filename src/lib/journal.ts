@@ -14,6 +14,15 @@ export interface JournalEntry {
   transcript_snapshots: string[];
   source: string;
   source_url: string | null;
+  speaker_names: string;
+  user_source: string;
+}
+
+export interface MeetingSegment {
+  speaker: number | null;
+  start_ms: number;
+  end_ms: number;
+  text: string;
 }
 
 export interface JournalFolder {
@@ -109,6 +118,74 @@ Transcript:
   },
 ];
 
+export const MEETING_PROMPTS = [
+  {
+    name: "Minutes",
+    prompt: `Generate government-style Notes of Meeting (NOMs) from this transcript.
+
+## Grammar & Style Rules
+
+| Element | Rule |
+|---------|------|
+| Tense | Reported speech |
+| Person | Third person - be specific who said what |
+| Voice | Active voice. NEVER use passive voice (e.g., "It was agreed...") - passive obscures attribution. |
+| Format | Prose, not bullet points |
+| Tone | Neutral, factual, concise |
+| Attribution | Always attribute positions/statements to specific people |
+
+Common constructions:
+- "[Person] highlighted/noted/clarified/explained that..."
+- "[Person] agreed that..."
+- "[Person] decided that..."
+- "The meeting discussed..."
+- "Action: [Person] to [verb] by [date]"
+
+## Structure
+
+### 1. Title
+- Ad-hoc/one-off meeting: Describe what the meeting is about
+- Regular meeting platform: Name of the platform
+
+### 2. Date
+- Date of the meeting
+
+### 3. Attendees
+- Bullet point list, most senior person first
+- Format: Name / Designation (Organisation)
+- Abbreviation rule: Because attendees' full names, designations, and orgs are stated here, the body can use abbreviations: Designation/Org.
+
+### 4. Contents
+Before the body table, include a simple contents list showing topics and sub-topics at a glance.
+
+### 5. Body
+Format: Table with 3 columns: S/N | Notes | For Action
+
+Two-row structure per topic:
+- Row 1 (header): S/N number + Topic title in Notes column. Merge Notes and For Action cells.
+- Row 2 (content): Blank S/N + detailed notes in Notes column, For Action as applicable.
+
+Notes column enumeration:
+- Each idea discussed under a topic: a., b., c. etc.
+- Sub-points if needed: i., ii., iii. etc.
+
+Sub-topic organisation:
+- Main topics (S/N) are often split into smaller sub-topics
+- Sub-topics appear as italics (sub-header)
+- Under each sub-topic, list notes as a., b., c. etc.
+- Leave a blank line between sub-topics
+
+For Action column rules:
+- Action items must be clear from the language in the Notes column
+- The For Action column states who is responsible - aligned to the specific bullet point where the action appears
+
+Return only the Notes of Meeting. Use the speaker labels from the transcript for attribution.
+
+Transcript:
+\${output}`,
+  },
+];
+
 // Default chat mode instructions (editable by user in Mutter settings)
 export const MUTTER_DEFAULT_CHAT_INSTRUCTIONS = {
   retrieve: `You are mutter, a strict information retrieval assistant. You have access to a journal entry and its linked entries. Your job is to answer questions ONLY based on what is explicitly stated in these entries.
@@ -159,6 +236,23 @@ Rules:
 - Do not introduce facts or information from outside the entry.
 - When mentioning tags, always format them using backticks like \`tagname\` so they render as badges.
 - Start the conversation by reading the entry and asking 1-2 targeted questions to get the user thinking.`,
+
+  synthesise: `You are mutter, an information retrieval and synthesis assistant for meeting transcripts. You have access to a meeting transcript with speaker-attributed segments and any linked entries.
+
+Your capabilities:
+- Answer questions based on what was discussed in the meeting.
+- Identify and list follow-up actions, owners, and deadlines mentioned in the meeting.
+- Summarise key decisions and outcomes.
+- Attribute statements and commitments to specific speakers.
+- Cross-reference with linked entries when relevant.
+
+Rules:
+- ONLY answer based on information explicitly present in the meeting transcript and linked entries below.
+- If the answer is not in the transcript, say so clearly. Do not guess, infer, or speculate.
+- When listing actions, clearly state who is responsible and any deadlines mentioned.
+- Be concise and accurate. Quote the transcript where helpful.
+- When referencing information from a linked entry, mention which entry it came from.
+- When mentioning tags, always format them using backticks like \`tagname\` so they render as badges.`,
 } as const;
 
 // Known model context windows (tokens). Patterns matched case-insensitively against model name.
@@ -288,6 +382,7 @@ export const journalCommands = {
     tags: string[];
     linkedEntryIds: number[];
     folderId: number | null;
+    userSource?: string;
   }) => invoke<void>("update_journal_entry", params),
 
   deleteEntry: (id: number) =>
@@ -399,6 +494,19 @@ export const videoCommands = {
     folderId: number | null;
   }) => invoke<JournalEntry>("save_video_entry", params),
 
+  // Diarization (shared — works on any entry with audio)
+  diarizeEntry: (entryId: number, maxSpeakers?: number, threshold?: number) =>
+    invoke<void>("diarize_entry", { entryId, maxSpeakers: maxSpeakers ?? null, threshold: threshold ?? null }),
+
+  getSegments: (entryId: number) =>
+    invoke<MeetingSegment[]>("get_meeting_segments", { entryId }),
+
+  updateSpeakerName: (entryId: number, speakerId: number, name: string) =>
+    invoke<void>("update_meeting_speaker_name", { entryId, speakerId, name }),
+
+  getSpeakerNames: (entryId: number) =>
+    invoke<Record<string, string>>("get_meeting_speaker_names", { entryId }),
+
   // Reuse journal commands for operations on individual entries
   getEntry: journalCommands.getEntry,
   updateEntry: journalCommands.updateEntry,
@@ -424,4 +532,71 @@ export const videoCommands = {
   moveEntryToFolder: journalCommands.moveEntryToFolder,
   getStoragePath: journalCommands.getStoragePath,
   setStoragePath: journalCommands.setStoragePath,
+};
+
+// --- Meeting commands ---
+
+export const meetingCommands = {
+  checkDiarizeModelsInstalled: () => invoke<boolean>("check_diarize_models_installed"),
+
+  installDiarizeModels: () => invoke<void>("install_diarize_models"),
+
+  getEntries: () => invoke<JournalEntry[]>("get_meeting_entries"),
+
+  getFolders: () => invoke<JournalFolder[]>("get_meeting_folders"),
+
+  createFolder: (name: string) =>
+    invoke<JournalFolder>("create_meeting_folder", { name }),
+
+  saveEntry: (params: {
+    fileName: string;
+    title: string;
+    transcriptionText: string;
+    folderId: number | null;
+  }) => invoke<JournalEntry>("save_meeting_entry", params),
+
+  transcribeMeeting: (entryId: number, maxSpeakers?: number, threshold?: number) =>
+    invoke<void>("transcribe_meeting", { entryId, maxSpeakers: maxSpeakers ?? null, threshold: threshold ?? null }),
+
+  getSegments: (entryId: number) =>
+    invoke<MeetingSegment[]>("get_meeting_segments", { entryId }),
+
+  updateSpeakerName: (entryId: number, speakerId: number, name: string) =>
+    invoke<void>("update_meeting_speaker_name", { entryId, speakerId, name }),
+
+  getSpeakerNames: (entryId: number) =>
+    invoke<Record<string, string>>("get_meeting_speaker_names", { entryId }),
+
+  // Reuse journal commands for shared operations
+  getEntry: journalCommands.getEntry,
+  updateEntry: journalCommands.updateEntry,
+  deleteEntry: journalCommands.deleteEntry,
+  applyPostProcess: journalCommands.applyPostProcess,
+  applyPromptTextToText: journalCommands.applyPromptTextToText,
+  updatePostProcessedText: journalCommands.updatePostProcessedText,
+  getAudioFilePath: journalCommands.getAudioFilePath,
+  updateTranscriptionText: journalCommands.updateTranscriptionText,
+  updateEntryAfterProcessing: journalCommands.updateEntryAfterProcessing,
+  applyPromptToEntry: journalCommands.applyPromptToEntry,
+  applyPromptTextToEntry: journalCommands.applyPromptTextToEntry,
+  undoPrompt: journalCommands.undoPrompt,
+  chat: journalCommands.chat,
+  createChatSession: journalCommands.createChatSession,
+  getChatSessions: journalCommands.getChatSessions,
+  saveChatMessage: journalCommands.saveChatMessage,
+  getChatMessages: journalCommands.getChatMessages,
+  updateChatSessionTitle: journalCommands.updateChatSessionTitle,
+  deleteChatSession: journalCommands.deleteChatSession,
+  renameFolder: journalCommands.renameFolder,
+  deleteFolder: journalCommands.deleteFolder,
+  moveEntryToFolder: journalCommands.moveEntryToFolder,
+  getStoragePath: journalCommands.getStoragePath,
+  setStoragePath: journalCommands.setStoragePath,
+
+  // Recording + import (reuse journal recording commands)
+  startRecording: journalCommands.startRecording,
+  stopRecording: journalCommands.stopRecording,
+  getPartialTranscription: journalCommands.getPartialTranscription,
+  discardRecording: journalCommands.discardRecording,
+  importAudio: journalCommands.importAudio,
 };

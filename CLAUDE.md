@@ -144,10 +144,11 @@ src/i18n/
 
 ### Backend (src-tauri/src/)
 - `managers/journal.rs` - JournalManager with `journal.db` (SQLite) and `journal_recordings/` directory
-  - DB tables: `journal_entries`, `journal_folders`, `journal_chat_sessions`, `journal_chat_messages`
-  - 5 migrations: initial schema, folders/folder_id column, transcript_snapshots column, chat sessions/messages tables, source/source_url columns
-  - `journal_entries` has `source` column (`voice`, `youtube`, `video`) and optional `source_url`
-  - `journal_folders` has `source` column (`voice`, `video`) to separate journal and video folders
+  - DB tables: `journal_entries`, `journal_folders`, `journal_chat_sessions`, `journal_chat_messages`, `meeting_segments`
+  - 6 migrations: initial schema, folders/folder_id column, transcript_snapshots column, chat sessions/messages tables, source/source_url columns, meeting segments/speaker_names
+  - `journal_entries` has `source` column (`voice`, `youtube`, `video`, `meeting`) and optional `source_url`
+  - `journal_entries` has `speaker_names` column (JSON map of speaker_id → custom name, for meeting entries)
+  - `journal_folders` has `source` column (`voice`, `video`, `meeting`) to separate journal, video, and meeting folders
   - Folders correspond to real filesystem directories inside `journal_recordings/`
 - `commands/journal.rs` - 28 Tauri commands + `dedup_consecutive_words()` function
   - **Word dedup**: Programmatically removes consecutively repeated words before every LLM prompt call (local LLMs can't handle many repetitions)
@@ -207,10 +208,14 @@ src/i18n/
 - **Video import**: Uses `symphonia` crate to extract audio from MP4/MKV/WebM containers (AAC, Vorbis, MP3, PCM codecs). Resamples to 16kHz mono, transcribes in chunks via TranscriptionManager, saves extracted audio as WAV. Entries have `source="video"`.
 - **Processing persistence**: YouTube downloads and video imports create a pending entry immediately (empty fileName/transcription), navigate to DetailView, and process in the background. Progress tracked in `processingEntries` Zustand store. DetailView shows processing overlay with status and progress bar. JournalEntryCard shows spinner for in-progress entries. `update_entry_after_processing` backend command updates file_name, title, and transcription when done.
 - **Shared infrastructure**: Video entries use the same `journal_entries`/`journal_folders` tables, same post-processing pipeline, same chat/jots system. Separated by `source` column filtering.
-- **JournalSettings parameterized**: Accepts `source` prop (`"voice"` | `"video"`). Voice shows Record/Import Audio; Video shows YouTube/Import Video. All folder/entry management is identical.
+- **JournalSettings parameterized**: Accepts `source` prop (`"voice"` | `"video"` | `"meeting"`). Voice shows Record/Import Audio; Video shows YouTube/Import Video; Meeting shows model setup + record. All folder/entry management is identical.
 - **Important**: When creating entries with empty `file_name` (pending entries), `save_entry_with_source` must check `!file_name.is_empty() && src_path.is_file()` before rename — otherwise `root.join("")` resolves to the recordings directory itself and `fs::rename` fails with EINVAL.
 
-## Tailwind CSS v4
+### Meeting Feature (Speaker Diarization)
+- **Third tab**: Meetings tab in MutterPanel alongside Journal and Video
+- **Speaker diarization**: Uses `pyannote-rs` (native Rust, same `ort = 2.0.0-rc.10` as `transcribe-rs`) for speaker segmentation and embedding
+- **Pipeline**: Record audio → Stop → Save WAV → pyannote-rs segments → transcribe-rs per segment → merge with speaker labels → store
+- **
 
 This project uses **Tailwind CSS v4** with the `@tailwindcss/vite` plugin. Configuration is CSS-based, NOT via `tailwind.config.js`.
 

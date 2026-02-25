@@ -41,9 +41,7 @@ pub async fn start_journal_recording(
     // Start recording with "journal" binding_id
     let started = recording_manager.try_start_recording("journal");
     if !started {
-        return Err(
-            "Failed to start recording. Another recording may be in progress.".to_string(),
-        );
+        return Err("Failed to start recording. Another recording may be in progress.".to_string());
     }
 
     Ok(())
@@ -184,9 +182,10 @@ pub async fn update_journal_entry(
     tags: Vec<String>,
     linked_entry_ids: Vec<i64>,
     folder_id: Option<i64>,
+    user_source: Option<String>,
 ) -> Result<(), String> {
     journal_manager
-        .update_entry(id, title, tags, linked_entry_ids, folder_id)
+        .update_entry(id, title, tags, linked_entry_ids, folder_id, user_source.unwrap_or_default())
         .await
         .map_err(|e| e.to_string())
 }
@@ -224,7 +223,10 @@ pub async fn apply_journal_post_process(
     // Get provider (clone to own it across the await boundary)
     let provider = settings
         .active_post_process_provider()
-        .ok_or_else(|| "No post-processing provider configured. Set one up in the Post Process tab.".to_string())?
+        .ok_or_else(|| {
+            "No post-processing provider configured. Set one up in the Post Process tab."
+                .to_string()
+        })?
         .clone();
 
     // Get API key
@@ -249,9 +251,10 @@ pub async fn apply_journal_post_process(
     let processed_prompt = prompt.prompt.replace("${output}", &text);
 
     // Call LLM
-    let result = crate::llm_client::send_chat_completion(&provider, api_key, &model, processed_prompt)
-        .await
-        .map_err(|e| format!("LLM call failed: {}", e))?;
+    let result =
+        crate::llm_client::send_chat_completion(&provider, api_key, &model, processed_prompt)
+            .await
+            .map_err(|e| format!("LLM call failed: {}", e))?;
 
     result.ok_or_else(|| "No response from LLM".to_string())
 }
@@ -269,7 +272,10 @@ pub async fn apply_prompt_text_to_text(
 
     let provider = settings
         .active_post_process_provider()
-        .ok_or_else(|| "No post-processing provider configured. Set one up in the Post Process tab.".to_string())?
+        .ok_or_else(|| {
+            "No post-processing provider configured. Set one up in the Post Process tab."
+                .to_string()
+        })?
         .clone();
 
     let api_key = settings
@@ -290,9 +296,10 @@ pub async fn apply_prompt_text_to_text(
 
     let processed_prompt = prompt_text.replace("${output}", &text);
 
-    let result = crate::llm_client::send_chat_completion(&provider, api_key, &model, processed_prompt)
-        .await
-        .map_err(|e| format!("LLM call failed: {}", e))?;
+    let result =
+        crate::llm_client::send_chat_completion(&provider, api_key, &model, processed_prompt)
+            .await
+            .map_err(|e| format!("LLM call failed: {}", e))?;
 
     result.ok_or_else(|| "No response from LLM".to_string())
 }
@@ -394,7 +401,8 @@ pub async fn apply_prompt_to_journal_entry(
         .ok_or_else(|| "Entry not found".to_string())?;
 
     // Apply post-processing (reuse existing logic)
-    let processed = apply_journal_post_process(app, entry.transcription_text, prompt_id.clone()).await?;
+    let processed =
+        apply_journal_post_process(app, entry.transcription_text, prompt_id.clone()).await?;
 
     // Save snapshot of current text, then update with processed result
     journal_manager
@@ -426,7 +434,10 @@ pub async fn apply_prompt_text_to_journal_entry(
 
     let provider = settings
         .active_post_process_provider()
-        .ok_or_else(|| "No post-processing provider configured. Set one up in the Post Process tab.".to_string())?
+        .ok_or_else(|| {
+            "No post-processing provider configured. Set one up in the Post Process tab."
+                .to_string()
+        })?
         .clone();
 
     let api_key = settings
@@ -447,13 +458,24 @@ pub async fn apply_prompt_text_to_journal_entry(
 
     // Programmatically remove consecutively repeated words before sending to LLM.
     // Local LLMs struggle with many duplicates (e.g. "your your your your ...").
-    let clean_text = dedup_consecutive_words(&entry.transcription_text);
+    let mut clean_text = dedup_consecutive_words(&entry.transcription_text);
+
+    // Substitute speaker names (e.g. [Speaker 1] → [Alice]) if available
+    if let Ok(names) = journal_manager.get_speaker_names(id).await {
+        for (speaker_id, name) in &names {
+            if !name.is_empty() {
+                clean_text =
+                    clean_text.replace(&format!("[Speaker {}]", speaker_id), &format!("[{}]", name));
+            }
+        }
+    }
 
     let processed_prompt = prompt_text.replace("${output}", &clean_text);
 
-    let result = crate::llm_client::send_chat_completion(&provider, api_key, &model, processed_prompt)
-        .await
-        .map_err(|e| format!("LLM call failed: {}", e))?;
+    let result =
+        crate::llm_client::send_chat_completion(&provider, api_key, &model, processed_prompt)
+            .await
+            .map_err(|e| format!("LLM call failed: {}", e))?;
 
     let processed = result.ok_or_else(|| "No response from LLM".to_string())?;
 
@@ -534,8 +556,8 @@ pub async fn import_audio_for_journal(
     }
 
     // Read audio file into f32 samples
-    let reader = hound::WavReader::open(src)
-        .map_err(|e| format!("Failed to read audio file: {}", e))?;
+    let reader =
+        hound::WavReader::open(src).map_err(|e| format!("Failed to read audio file: {}", e))?;
     let spec = reader.spec();
     let samples: Vec<f32> = match spec.sample_format {
         hound::SampleFormat::Int => {
@@ -546,12 +568,10 @@ pub async fn import_audio_for_journal(
                 .map(move |s| s as f32 / (1_i64 << (bits - 1)) as f32)
                 .collect()
         }
-        hound::SampleFormat::Float => {
-            reader
-                .into_samples::<f32>()
-                .filter_map(|s| s.ok())
-                .collect()
-        }
+        hound::SampleFormat::Float => reader
+            .into_samples::<f32>()
+            .filter_map(|s| s.ok())
+            .collect(),
     };
 
     if samples.is_empty() {
@@ -627,7 +647,9 @@ pub async fn journal_chat(
 
     let provider = settings
         .active_post_process_provider()
-        .ok_or_else(|| "No LLM provider configured. Set one up in the Post Process tab.".to_string())?
+        .ok_or_else(|| {
+            "No LLM provider configured. Set one up in the Post Process tab.".to_string()
+        })?
         .clone();
 
     let api_key = settings
@@ -808,9 +830,12 @@ pub async fn get_journal_storage_path(
     journal_manager: State<'_, Arc<JournalManager>>,
 ) -> Result<String, String> {
     let settings = crate::settings::get_settings(&app);
-    let path = settings
-        .journal_storage_path
-        .unwrap_or_else(|| journal_manager.recordings_dir().to_string_lossy().to_string());
+    let path = settings.journal_storage_path.unwrap_or_else(|| {
+        journal_manager
+            .recordings_dir()
+            .to_string_lossy()
+            .to_string()
+    });
     Ok(path)
 }
 

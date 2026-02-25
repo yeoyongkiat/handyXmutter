@@ -1,11 +1,9 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { BookOpen, Video, Settings } from "lucide-react";
+import { BookOpen, Video, Users, Settings } from "lucide-react";
 import { JournalSettings } from "../settings/journal/JournalSettings";
 import { MutterSettings } from "./MutterSettings";
-import { useMutterStore } from "@/stores/mutterStore";
-
-type MutterTab = "journal" | "video";
+import { useMutterStore, type MutterTab } from "@/stores/mutterStore";
 
 const MUTTER_TABS = {
   journal: {
@@ -16,11 +14,16 @@ const MUTTER_TABS = {
     labelKey: "mutter.tabs.video",
     icon: Video,
   },
+  meeting: {
+    labelKey: "mutter.tabs.meeting",
+    icon: Users,
+  },
 } as const;
 
 export const MutterPanel: React.FC = () => {
   const { t } = useTranslation();
-  const [activeTab, setActiveTab] = useState<MutterTab>("journal");
+  const activeTab = useMutterStore((s) => s.activeTab);
+  const setActiveTab = useMutterStore((s) => s.setActiveTab);
   const [showSettings, setShowSettings] = useState(false);
 
   return (
@@ -69,6 +72,7 @@ export const MutterPanel: React.FC = () => {
             <>
               {activeTab === "journal" && <JournalSettingsWithStore />}
               {activeTab === "video" && <VideoSettingsWithStore />}
+              {activeTab === "meeting" && <MeetingSettingsWithStore />}
             </>
           )}
         </div>
@@ -105,6 +109,24 @@ const VideoSettingsWithStore: React.FC = () => {
   return (
     <JournalSettings
       source="video"
+      selectedEntryId={selectedEntryId}
+      selectedFolderId={selectedFolderId}
+      onSelectEntry={setSelectedEntryId}
+      onSelectFolder={setSelectedFolderId}
+    />
+  );
+};
+
+// Wrapper for the Meeting tab — uses JournalSettings with source="meeting"
+const MeetingSettingsWithStore: React.FC = () => {
+  const selectedEntryId = useMutterStore((s) => s.selectedMeetingEntryId);
+  const setSelectedEntryId = useMutterStore((s) => s.setSelectedMeetingEntryId);
+  const selectedFolderId = useMutterStore((s) => s.selectedMeetingFolderId);
+  const setSelectedFolderId = useMutterStore((s) => s.setSelectedMeetingFolderId);
+
+  return (
+    <JournalSettings
+      source="meeting"
       selectedEntryId={selectedEntryId}
       selectedFolderId={selectedFolderId}
       onSelectEntry={setSelectedEntryId}

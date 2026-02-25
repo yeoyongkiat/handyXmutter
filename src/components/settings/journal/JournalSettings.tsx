@@ -33,6 +33,9 @@ import {
   Video,
   Globe,
   Loader2,
+  Users,
+  Download,
+  Eye,
 } from "lucide-react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -44,10 +47,13 @@ import { formatDateShort } from "@/utils/dateFormat";
 import {
   journalCommands,
   videoCommands,
+  meetingCommands,
   MUTTER_DEFAULT_PROMPTS,
+  MEETING_PROMPTS,
   MUTTER_DEFAULT_CHAT_INSTRUCTIONS,
   type JournalEntry,
   type JournalFolder,
+  type MeetingSegment,
   getModelContextWindow,
 } from "@/lib/journal";
 import { JotterEditor } from "@/components/mutter/JotterEditor";
@@ -136,7 +142,7 @@ type ViewMode =
   | { mode: "importing"; folderId: number }
   | { mode: "youtube-input"; folderId: number };
 
-export type EntrySource = "voice" | "video";
+export type EntrySource = "voice" | "video" | "meeting";
 
 interface JournalSettingsProps {
   source?: EntrySource;
@@ -159,13 +165,13 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
   const [folders, setFolders] = useState<JournalFolder[]>([]);
 
   // Select the right commands based on source
-  const cmds = source === "video" ? videoCommands : journalCommands;
+  const cmds = source === "video" ? videoCommands : source === "meeting" ? meetingCommands : journalCommands;
 
   const loadData = useCallback(async () => {
     try {
       const [entryData, folderData] = await Promise.all([
-        source === "video" ? videoCommands.getEntries() : journalCommands.getEntries(),
-        source === "video" ? videoCommands.getFolders() : journalCommands.getFolders(),
+        source === "video" ? videoCommands.getEntries() : source === "meeting" ? meetingCommands.getEntries() : journalCommands.getEntries(),
+        source === "video" ? videoCommands.getFolders() : source === "meeting" ? meetingCommands.getFolders() : journalCommands.getFolders(),
       ]);
       setEntries(entryData);
       setFolders(folderData);
@@ -488,6 +494,97 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
     }
   };
 
+  // --- Meeting-specific handlers ---
+
+  const handleMeetingStopRecording = async (folderId: number) => {
+    try {
+      const result = await journalCommands.stopRecording();
+      // Save entry with source="meeting"
+      const title = new Date().toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      const entry = await meetingCommands.saveEntry({
+        fileName: result.file_name,
+        title,
+        transcriptionText: "",
+        folderId,
+      });
+      await loadData();
+      setProcessingEntry(entry.id, "diarizing", 0);
+      setView({ mode: "detail", entryId: entry.id, folderId, trail: [] });
+
+      // Run diarize + transcribe pipeline in background
+      meetingCommands.transcribeMeeting(entry.id).then(() => {
+        clearProcessingEntry(entry.id);
+        loadData();
+      }).catch((error) => {
+        console.error("Meeting transcription failed:", error);
+        clearProcessingEntry(entry.id);
+        toast.error(String(error));
+      });
+    } catch (error) {
+      console.error("Failed to stop meeting recording:", error);
+      setView({ mode: "folder", folderId });
+    }
+  };
+
+  const handleImportMeeting = async (folderId: number, filePath?: string) => {
+    const path = filePath || await (async () => {
+      const selected = await openFileDialog({
+        multiple: false,
+        filters: [{ name: "Audio", extensions: ["wav"] }],
+      });
+      return selected ?? null;
+    })();
+    if (!path) return;
+
+    try {
+      const title = new Date().toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      // Create pending meeting entry
+      const entry = await meetingCommands.saveEntry({
+        fileName: "",
+        title,
+        transcriptionText: "",
+        folderId,
+      });
+      await loadData();
+      setProcessingEntry(entry.id, "importing", 0);
+      setView({ mode: "detail", entryId: entry.id, folderId, trail: [] });
+
+      // Import audio (resamples + basic transcription), then run diarized transcription
+      meetingCommands.importAudio(path).then(async (result) => {
+        // Update entry with the imported file
+        await meetingCommands.updateEntryAfterProcessing(
+          entry.id, result.file_name, title, ""
+        );
+        setProcessingEntry(entry.id, "diarizing", 0);
+        // Run diarize + per-segment transcribe pipeline
+        return meetingCommands.transcribeMeeting(entry.id);
+      }).then(() => {
+        clearProcessingEntry(entry.id);
+        loadData();
+      }).catch((error) => {
+        console.error("Failed to import meeting audio:", error);
+        clearProcessingEntry(entry.id);
+        toast.error(String(error));
+      });
+    } catch (error) {
+      console.error("Failed to create meeting entry:", error);
+      toast.error(String(error));
+      setView({ mode: "new-entry", folderId });
+    }
+  };
+
   const handleSaved = (folderId: number) => {
     setView({ mode: "folder", folderId });
     onSelectEntry?.(null);
@@ -527,7 +624,7 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
       <WelcomeView
         onFolderCreated={handleFolderCreated}
         source={source}
-        createFolderFn={source === "video" ? videoCommands.createFolder : undefined}
+        createFolderFn={source === "video" ? videoCommands.createFolder : source === "meeting" ? meetingCommands.createFolder : undefined}
       />
     );
   }
@@ -621,14 +718,14 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
   // Determine right-side action button
   let actionButton: React.ReactNode = null;
   if (view.mode === "folders") {
-    actionButton = <FolderCreateButton onFolderCreated={handleFolderCreated} createFolderFn={source === "video" ? videoCommands.createFolder : undefined} />;
+    actionButton = <FolderCreateButton onFolderCreated={handleFolderCreated} createFolderFn={source === "video" ? videoCommands.createFolder : source === "meeting" ? meetingCommands.createFolder : undefined} />;
   } else if (view.mode === "folder") {
     actionButton = (
       <MutterButton
         onClick={() => handleNewEntry(view.folderId)}
         className="flex items-center gap-2"
       >
-        {source === "video" ? <Video className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+        {source === "video" ? <Video className="w-4 h-4" /> : source === "meeting" ? <Users className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
         <span>{t("settings.journal.newEntry")}</span>
       </MutterButton>
     );
@@ -678,7 +775,7 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
           entries={entries}
           onOpenFolder={handleOpenFolder}
           onFolderCreated={handleFolderCreated}
-          createFolderFn={source === "video" ? videoCommands.createFolder : undefined}
+          createFolderFn={source === "video" ? videoCommands.createFolder : source === "meeting" ? meetingCommands.createFolder : undefined}
         />
       )}
       {view.mode === "folder" && (() => {
@@ -742,6 +839,13 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
           onCancel={() => setView({ mode: "folder", folderId: view.folderId })}
         />
       )}
+      {view.mode === "new-entry" && source === "meeting" && (
+        <MeetingNewEntryView
+          onRecord={() => handleStartRecording(view.folderId)}
+          onImport={() => handleImportMeeting(view.folderId)}
+          onCancel={() => setView({ mode: "folder", folderId: view.folderId })}
+        />
+      )}
       {view.mode === "youtube-input" && (
         <YouTubeInputView
           onSubmit={(url) => handleYouTubeSubmit(view.folderId, url)}
@@ -750,7 +854,7 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
       )}
       {view.mode === "recording" && (
         <RecordingView
-          onStop={() => handleStopRecording(view.folderId)}
+          onStop={() => source === "meeting" ? handleMeetingStopRecording(view.folderId) : handleStopRecording(view.folderId)}
           onCancel={() => handleCancelRecording(view.folderId)}
         />
       )}
@@ -970,6 +1074,15 @@ function searchEntries(
     );
   }
 
+  // /s query — user source search
+  if (q.startsWith("/s ")) {
+    const sourceQuery = q.slice(3).toLowerCase();
+    if (!sourceQuery) return [];
+    return entries.filter((e) =>
+      (e.user_source || "").toLowerCase().includes(sourceQuery),
+    );
+  }
+
   // Plain text — title search
   const lower = q.toLowerCase();
   return entries.filter((e) => e.title.toLowerCase().includes(lower));
@@ -989,6 +1102,7 @@ const SearchResultsView: React.FC<{
   const isTagSearch = query.startsWith("#");
   const isDateSearch = query.startsWith("::");
   const isLinkSearch = /^\[.+\]$/.test(query);
+  const isSourceSearch = query.startsWith("/s ");
 
   return (
     <div className="px-4">
@@ -1019,7 +1133,13 @@ const SearchResultsView: React.FC<{
               <span className="text-mutter-primary font-medium">{query.slice(1, -1)}</span>
             </span>
           )}
-          {!isFolderSearch && !isTagSearch && !isDateSearch && !isLinkSearch && (
+          {isSourceSearch && (
+            <span className="inline-flex items-center gap-1">
+              <Globe className="w-3 h-3 text-mutter-primary" />
+              <span className="text-mutter-primary font-medium">{query.slice(3)}</span>
+            </span>
+          )}
+          {!isFolderSearch && !isTagSearch && !isDateSearch && !isLinkSearch && !isSourceSearch && (
             <span className="text-text/60">&ldquo;{query}&rdquo;</span>
           )}
           <span className="ml-2 text-text/30">
@@ -1094,16 +1214,18 @@ const WelcomeView: React.FC<{
       <div className="w-16 h-16 rounded-full bg-mutter-primary/20 flex items-center justify-center">
         {source === "video" ? (
           <Video className="w-8 h-8 text-mutter-primary" />
+        ) : source === "meeting" ? (
+          <Users className="w-8 h-8 text-mutter-primary" />
         ) : (
           <BookOpen className="w-8 h-8 text-mutter-primary" />
         )}
       </div>
       <div className="space-y-2">
         <h2 className="text-lg font-semibold">
-          {t(source === "video" ? "settings.video.welcome.title" : "settings.journal.welcome.title")}
+          {t(source === "video" ? "settings.video.welcome.title" : source === "meeting" ? "settings.meeting.welcome.title" : "settings.journal.welcome.title")}
         </h2>
         <p className="text-sm text-text/60 leading-relaxed">
-          {t(source === "video" ? "settings.video.welcome.description" : "settings.journal.welcome.description")}
+          {t(source === "video" ? "settings.video.welcome.description" : source === "meeting" ? "settings.meeting.welcome.description" : "settings.journal.welcome.description")}
         </p>
       </div>
       {creating ? (
@@ -1134,7 +1256,7 @@ const WelcomeView: React.FC<{
           className="flex items-center gap-2"
         >
           <FolderPlus className="w-4 h-4" />
-          <span>{t(source === "video" ? "settings.video.welcome.createFirstFolder" : "settings.journal.welcome.createFirstFolder")}</span>
+          <span>{t(source === "video" ? "settings.video.welcome.createFirstFolder" : source === "meeting" ? "settings.meeting.welcome.createFirstFolder" : "settings.journal.welcome.createFirstFolder")}</span>
         </MutterButton>
       )}
     </div>
@@ -1324,24 +1446,84 @@ const FolderDetailView: React.FC<{
 }> = ({ folder, folders, entries, source = "voice", onStartRecording, onOpenDetail, onDeleteEntry, onDeleteAll, onMoveEntry }) => {
   const { t } = useTranslation();
   const isVideo = source === "video";
+  const isMeeting = source === "meeting";
+
+  // Folder-level chat state (ephemeral — resets when leaving folder)
+  const [folderChatOpen, setFolderChatOpen] = useState(false);
+  const [folderChatMessages, setFolderChatMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
+  const [folderChatInput, setFolderChatInput] = useState("");
+  const [folderChatLoading, setFolderChatLoading] = useState(false);
+  const folderChatContainerRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll folder chat (must be before conditional return for hooks rules)
+  useEffect(() => {
+    if (folderChatContainerRef.current) {
+      folderChatContainerRef.current.scrollTop = folderChatContainerRef.current.scrollHeight;
+    }
+  }, [folderChatMessages, folderChatLoading]);
 
   if (!folder) return null;
 
+  const SourceIcon = isMeeting ? Users : isVideo ? Video : Mic;
+
+  // Build folder context for LLM
+  const buildFolderContext = () => {
+    if (entries.length === 0) return "";
+    const timestamps = entries.map((e) => e.timestamp);
+    const earliest = new Date(Math.min(...timestamps) * 1000).toLocaleDateString();
+    const latest = new Date(Math.max(...timestamps) * 1000).toLocaleDateString();
+    const allTags = Array.from(new Set(entries.flatMap((e) => e.tags))).join(", ");
+    const entryDetails = entries
+      .map((e) => {
+        const date = new Date(e.timestamp * 1000).toLocaleDateString();
+        const tags = e.tags.length > 0 ? ` [tags: ${e.tags.join(", ")}]` : "";
+        const preview = e.transcription_text.slice(0, 200);
+        return `- "${e.title}" (${date})${tags}: ${preview}`;
+      })
+      .join("\n");
+    return `Folder: ${folder.name}\nEntries: ${entries.length}\nDate range: ${earliest} to ${latest}\nTags: ${allTags || "none"}\n\nEntries:\n${entryDetails}`;
+  };
+
+  const handleFolderChatSend = async () => {
+    const msg = folderChatInput.trim();
+    if (!msg || folderChatLoading) return;
+    setFolderChatInput("");
+    const userMsg = { role: "user" as const, content: msg };
+    const updated = [...folderChatMessages, userMsg];
+    setFolderChatMessages(updated);
+    setFolderChatLoading(true);
+
+    try {
+      const systemPrompt = `You are mutter, a helpful assistant for a folder of journal entries. Answer questions based on the folder context provided.\n\n${buildFolderContext()}`;
+      const apiMessages: [string, string][] = [
+        ["system", systemPrompt],
+        ...updated.map((m): [string, string] => [m.role, m.content]),
+      ];
+      const response = await journalCommands.chat(apiMessages);
+      setFolderChatMessages((prev) => [...prev, { role: "assistant", content: response }]);
+    } catch (error) {
+      console.error("Folder chat failed:", error);
+      setFolderChatMessages((prev) => [...prev, { role: "assistant", content: `Error: ${error}` }]);
+    } finally {
+      setFolderChatLoading(false);
+    }
+  };
+
   return (
-    <div className="px-4 space-y-2">
+    <div className="px-4 space-y-2 relative">
       {entries.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 text-center gap-4">
           <div className="w-12 h-12 rounded-full bg-mutter-primary/10 flex items-center justify-center">
-            {isVideo ? <Video className="w-6 h-6 text-mutter-primary/60" /> : <Mic className="w-6 h-6 text-mutter-primary/60" />}
+            <SourceIcon className="w-6 h-6 text-mutter-primary/60" />
           </div>
           <p className="text-sm text-text/50">
-            {isVideo ? t("settings.journal.folders.emptyFolderVideo") : t("settings.journal.folders.emptyFolder")}
+            {isMeeting ? t("settings.journal.folders.emptyFolderMeeting") : isVideo ? t("settings.journal.folders.emptyFolderVideo") : t("settings.journal.folders.emptyFolder")}
           </p>
           <MutterButton
             onClick={onStartRecording}
             className="flex items-center gap-2"
           >
-            {isVideo ? <Video className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            <SourceIcon className="w-4 h-4" />
             <span>{t("settings.journal.newEntry")}</span>
           </MutterButton>
         </div>
@@ -1373,6 +1555,102 @@ const FolderDetailView: React.FC<{
             </div>
           </div>
         </>
+      )}
+
+      {/* Folder chat floating button */}
+      {entries.length > 0 && !folderChatOpen && (
+        <button
+          onClick={() => setFolderChatOpen(true)}
+          className="fixed bottom-6 right-6 w-10 h-10 rounded-full bg-mutter-primary text-white shadow-lg flex items-center justify-center hover:bg-mutter-primary/80 transition-colors cursor-pointer z-20"
+          title={t("settings.journal.folderChat.title")}
+        >
+          <MessageCircle className="w-5 h-5" />
+        </button>
+      )}
+
+      {/* Folder chat panel */}
+      {folderChatOpen && (
+        <div className="sticky bottom-4 bg-background border border-mid-gray/20 rounded-lg shadow-xl flex flex-col overflow-hidden h-[28rem] max-w-2xl ml-auto z-20">
+          {/* Header */}
+          <div className="flex items-center justify-between px-3 py-2 border-b border-mid-gray/20 shrink-0">
+            <div className="flex items-center gap-2 min-w-0">
+              <FolderOpen className="w-3.5 h-3.5 text-mutter-primary shrink-0" />
+              <span className="text-xs font-medium text-text/70 truncate">{folder.name}</span>
+              <span className="text-[10px] text-text/40 shrink-0">{entries.length} {entries.length === 1 ? "entry" : "entries"}</span>
+            </div>
+            <div className="flex items-center gap-1">
+              {folderChatMessages.length > 0 && (
+                <button
+                  onClick={() => setFolderChatMessages([])}
+                  className="p-1 rounded text-text/40 hover:text-text/70 hover:bg-mid-gray/10 cursor-pointer"
+                  title={t("common.reset")}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
+                </button>
+              )}
+              <button
+                onClick={() => setFolderChatOpen(false)}
+                className="p-1 rounded text-text/40 hover:text-text/70 hover:bg-mid-gray/10 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Messages */}
+          <div ref={folderChatContainerRef} className="flex-1 overflow-y-auto p-3 space-y-3">
+            {folderChatMessages.length === 0 ? (
+              <div className="flex flex-col items-center gap-2 py-8">
+                <MessageCircle className="w-6 h-6 text-mutter-primary/30" />
+                <p className="text-xs text-text/40 text-center">{t("settings.journal.folderChat.welcome")}</p>
+              </div>
+            ) : (
+              folderChatMessages.map((m, i) => (
+                <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[85%] px-3 py-2 rounded-lg text-sm ${
+                    m.role === "user"
+                      ? "bg-mutter-primary text-white rounded-br-sm"
+                      : "text-text [&_p]:mb-3 [&_p:last-child]:mb-0"
+                  }`}>
+                    {m.role === "assistant" ? (
+                      <Markdown remarkPlugins={[remarkBreaks, remarkGfm]}>{m.content}</Markdown>
+                    ) : m.content}
+                  </div>
+                </div>
+              ))
+            )}
+            {folderChatLoading && (
+              <div className="flex justify-start">
+                <div className="flex gap-1 px-3 py-2">
+                  <span className="w-1.5 h-1.5 bg-mutter-primary/40 rounded-full animate-bounce [animation-delay:0ms]" />
+                  <span className="w-1.5 h-1.5 bg-mutter-primary/40 rounded-full animate-bounce [animation-delay:150ms]" />
+                  <span className="w-1.5 h-1.5 bg-mutter-primary/40 rounded-full animate-bounce [animation-delay:300ms]" />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Input */}
+          <div className="border-t border-mid-gray/20 p-2 shrink-0">
+            <div className="flex items-end gap-2">
+              <textarea
+                value={folderChatInput}
+                onChange={(e) => setFolderChatInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleFolderChatSend(); } }}
+                placeholder={t("settings.journal.chatInputPlaceholder")}
+                rows={1}
+                className="flex-1 resize-none text-sm bg-transparent focus:outline-none placeholder:text-text/30 max-h-20"
+              />
+              <button
+                onClick={handleFolderChatSend}
+                disabled={!folderChatInput.trim() || folderChatLoading}
+                className="p-1.5 rounded-lg bg-mutter-primary text-white disabled:opacity-30 cursor-pointer disabled:cursor-not-allowed"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1925,6 +2203,7 @@ const DetailView: React.FC<{
   const promptOverrides = useMutterStore((s) => s.promptOverrides);
   const processingInfo = useMutterStore((s) => s.processingEntries[entryId]);
   const setProcessingEntry = useMutterStore((s) => s.setProcessingEntry);
+  const clearProcessingEntry = useMutterStore((s) => s.clearProcessingEntry);
 
   const activeProviderId = settings?.post_process_provider_id ?? "";
   const activeModelName = activeProviderId ? (settings?.post_process_models?.[activeProviderId] ?? "") : "";
@@ -1939,12 +2218,18 @@ const DetailView: React.FC<{
   const [linkDropdownOpen, setLinkDropdownOpen] = useState(false);
   const [editTranscription, setEditTranscription] = useState("");
   const [isEditingTranscription, setIsEditingTranscription] = useState(false);
+  const speakerNamesRef = useRef<Record<string, string>>({});
   const [showCopied, setShowCopied] = useState(false);
   const [processingPromptId, setProcessingPromptId] = useState<string | null>(null);
   const [isRetranscribing, setIsRetranscribing] = useState(false);
+  const [isDiarizing, setIsDiarizing] = useState(false);
+  const [diarizeProgress, setDiarizeProgress] = useState("");
+  const [hasSegments, setHasSegments] = useState(false);
+  const [diarizeMaxSpeakers, setDiarizeMaxSpeakers] = useState(6);
+  const [diarizeThreshold, setDiarizeThreshold] = useState(0.5);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatMaximised, setChatMaximised] = useState(false);
-  const [chatMode, setChatMode] = useState<"jotter" | "retrieve" | "sharpen" | "brainstorm" | null>(null);
+  const [chatMode, setChatMode] = useState<"jotter" | "retrieve" | "sharpen" | "brainstorm" | "noms" | "synthesise" | null>(null);
   const [jotterText, setJotterText] = useState("");
   const jotterSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [chatMessages, setChatMessages] = useState<{ role: "user" | "assistant"; content: string }[]>([]);
@@ -1977,12 +2262,14 @@ const DetailView: React.FC<{
   const linkSearchRef = React.useRef<HTMLDivElement>(null);
 
   // Mutter's own prompt pipeline (independent from Handy's post_process_prompts)
+  const isMeetingEntry = entry?.source === "meeting";
+  const promptDefaults = isMeetingEntry ? MEETING_PROMPTS : MUTTER_DEFAULT_PROMPTS;
   const mutterPromptPipeline = React.useMemo(() => {
-    return MUTTER_DEFAULT_PROMPTS.map((d) => ({
+    return promptDefaults.map((d) => ({
       label: d.name,
       prompt: promptOverrides[d.name.toLowerCase() as keyof typeof promptOverrides] ?? d.prompt,
     }));
-  }, [promptOverrides]);
+  }, [promptOverrides, promptDefaults]);
 
   // Collect all unique tags across all entries for the dropdown
   const allKnownTags = React.useMemo(() => {
@@ -1999,9 +2286,17 @@ const DetailView: React.FC<{
         setEditTitle(data.title);
         setEditTags([...data.tags]);
         setEditLinkedIds([...data.linked_entry_ids]);
+        setEditUserSource(data.user_source || "");
         if (!isEditingTranscription) {
           setEditTranscription(data.transcription_text);
         }
+        // Load speaker names and check for segments
+        meetingCommands.getSegments(entryId).then((segs) => {
+          setHasSegments(segs.length > 0);
+        });
+        meetingCommands.getSpeakerNames(entryId).then((names) => {
+          speakerNamesRef.current = names;
+        });
       }
     } catch (error) {
       console.error("Failed to load journal entry:", error);
@@ -2027,6 +2322,7 @@ const DetailView: React.FC<{
     if (!processingInfo) return;
     let unlistenProgress: (() => void) | undefined;
     let unlistenStatus: (() => void) | undefined;
+    let unlistenMeeting: (() => void) | undefined;
 
     const setup = async () => {
       unlistenProgress = await listen<number>("ytdlp-audio-progress", (event) => {
@@ -2035,14 +2331,56 @@ const DetailView: React.FC<{
       unlistenStatus = await listen<string>("ytdlp-status", (event) => {
         setProcessingEntry(entryId, event.payload, 0);
       });
+      unlistenMeeting = await listen<{ entryId: number; stage: string; current?: number; total?: number }>("meeting-status", (event) => {
+        const data = event.payload;
+        if (data.entryId !== entryId) return;
+        if (data.stage === "done") {
+          clearProcessingEntry(entryId);
+        } else if (data.stage === "transcribing" && data.current && data.total) {
+          setProcessingEntry(entryId, "transcribing-meeting", data.current);
+        } else {
+          setProcessingEntry(entryId, data.stage, 0);
+        }
+      });
     };
     setup();
 
     return () => {
       unlistenProgress?.();
       unlistenStatus?.();
+      unlistenMeeting?.();
     };
   }, [entryId, !!processingInfo]);
+
+  // Listen for diarize-status events (for user-triggered diarization on video/voice entries)
+  useEffect(() => {
+    if (!isDiarizing) return;
+    let unlisten: (() => void) | undefined;
+    const setup = async () => {
+      unlisten = await listen<{ entryId: number; stage: string; current?: number; total?: number }>("diarize-status", (event) => {
+        const data = event.payload;
+        if (data.entryId !== entryId) return;
+        if (data.stage === "done") {
+          setDiarizeProgress("");
+          setIsDiarizing(false);
+          // Reload segments to check if diarization actually found any
+          meetingCommands.getSegments(entryId).then((segs) => {
+            setHasSegments(segs.length > 0);
+          });
+          loadEntry();
+          meetingCommands.getSpeakerNames(entryId).then((names) => {
+            speakerNamesRef.current = names;
+          });
+        } else if (data.stage === "transcribing" && data.current && data.total) {
+          setDiarizeProgress(`${data.current}/${data.total}`);
+        } else {
+          setDiarizeProgress(data.stage);
+        }
+      });
+    };
+    setup();
+    return () => { unlisten?.(); };
+  }, [isDiarizing, entryId, loadEntry]);
 
   // Reload entry when processing completes (entry gets updated by backend)
   useEffect(() => {
@@ -2051,11 +2389,14 @@ const DetailView: React.FC<{
     }
   }, [processingInfo, loadEntry]);
 
+  const [editUserSource, setEditUserSource] = useState("");
+
   // Save helper — persists current field values
   const saveFields = useCallback(async (
     title: string,
     tags: string[],
     linkedIds: number[],
+    userSource?: string,
   ) => {
     if (!entry) return;
     try {
@@ -2065,12 +2406,13 @@ const DetailView: React.FC<{
         tags,
         linkedEntryIds: linkedIds,
         folderId: entry.folder_id,
+        userSource: userSource ?? editUserSource,
       });
       loadEntry();
     } catch (error) {
       console.error("Failed to update entry:", error);
     }
-  }, [entry, loadEntry]);
+  }, [entry, loadEntry, editUserSource]);
 
   // Title — save on blur
   const handleTitleBlur = () => {
@@ -2197,6 +2539,31 @@ const DetailView: React.FC<{
     }
   };
 
+  const handleDiarize = async (maxSpeakers?: number, threshold?: number) => {
+    if (!entry) return;
+    const modelsInstalled = await meetingCommands.checkDiarizeModelsInstalled();
+    if (!modelsInstalled) {
+      try {
+        setDiarizeProgress("installing models");
+        await meetingCommands.installDiarizeModels();
+      } catch (error) {
+        console.error("Failed to install diarize models:", error);
+        setDiarizeProgress("");
+        return;
+      }
+    }
+    setIsDiarizing(true);
+    setDiarizeProgress("loading");
+    try {
+      await videoCommands.diarizeEntry(entry.id, maxSpeakers ?? diarizeMaxSpeakers, threshold ?? diarizeThreshold);
+      // Event listener handles the "done" state update
+    } catch (error) {
+      console.error("Failed to diarize entry:", error);
+      setIsDiarizing(false);
+      setDiarizeProgress("");
+    }
+  };
+
   const handleUndoPrompt = async (previousPromptId: string | null) => {
     if (!entry) return;
     setProcessingPromptId("__undo__");
@@ -2212,12 +2579,22 @@ const DetailView: React.FC<{
 
   const getSystemPrompt = (): string | null => {
     if (!entry || !chatMode) return null;
-    if (chatMode === "jotter") return null;
+    if (chatMode === "jotter" || chatMode === "noms") return null;
 
     const linkedEntryDetails = allEntries
       .filter((e) => entry.linked_entry_ids.includes(e.id))
       .map((e) => `- "${e.title}" (${new Date(e.timestamp * 1000).toLocaleDateString()}): ${e.transcription_text}`)
       .join("\n");
+
+    // Substitute speaker names into transcript for any diarized entry
+    let transcript = entry.transcription_text;
+    if (Object.keys(speakerNamesRef.current).length > 0) {
+      for (const [id, name] of Object.entries(speakerNamesRef.current)) {
+        if (name) {
+          transcript = transcript.split(`[Speaker ${id}]`).join(`[${name}]`);
+        }
+      }
+    }
 
     const entryContext = `
 
@@ -2228,7 +2605,7 @@ Tags: ${entry.tags.join(", ") || "none"}
 Linked entries: ${entry.linked_entry_ids.length > 0 ? allEntries.filter((e) => entry.linked_entry_ids.includes(e.id)).map((e) => `"${e.title}"`).join(", ") : "none"}
 
 Transcript:
-${entry.transcription_text}
+${transcript}
 ${linkedEntryDetails ? `
 === LINKED ENTRIES ===
 ${linkedEntryDetails}` : ""}`;
@@ -2318,8 +2695,8 @@ ${linkedEntryDetails}` : ""}`;
   const handleCloseChat = async () => {
     setChatOpen(false);
     if (!chatSessionId) return;
-    if (chatMode === "jotter") {
-      // For jotter, auto-title from first line of text
+    if (chatMode === "jotter" || chatMode === "noms") {
+      // For jotter/noms, auto-title from first line of text
       if (jotterText.trim() && !titleGeneratedForSession.current.has(chatSessionId)) {
         titleGeneratedForSession.current.add(chatSessionId);
         const firstLine = jotterText.trim().split("\n")[0].replace(/^#+\s*/, "").slice(0, 50);
@@ -2617,18 +2994,49 @@ ${linkedEntryDetails}` : ""}`;
             )}
           </div>
 
+          {/* User source (for journal + video entries, not meetings) */}
+          {!isMeetingEntry && (
+            <div>
+              <label className="text-xs font-medium text-text/60 uppercase tracking-wide mb-1 block">
+                {t("settings.journal.userSource")}
+              </label>
+              <div className="flex items-center gap-2">
+                <Globe className="w-3.5 h-3.5 text-text/30 shrink-0" />
+                <input
+                  type="text"
+                  value={editUserSource}
+                  onChange={(e) => setEditUserSource(e.target.value)}
+                  onBlur={() => {
+                    if (entry && editUserSource !== (entry.user_source || "")) {
+                      saveFields(editTitle, editTags, editLinkedIds, editUserSource);
+                    }
+                  }}
+                  placeholder={t("settings.journal.userSourcePlaceholder")}
+                  className="flex-1 text-sm bg-transparent border-b border-mid-gray/20 focus:border-mutter-primary focus:outline-none px-1 py-0.5 placeholder:text-text/20"
+                />
+              </div>
+            </div>
+          )}
+
           {/* Processing overlay */}
           {processingInfo && (
             <div className="bg-mutter-primary/5 border border-mutter-primary/20 rounded-lg p-6 flex flex-col items-center gap-3">
               <Loader2 className="w-6 h-6 text-mutter-primary animate-spin" />
               <p className="text-sm font-medium text-text/70">
-                {processingInfo.status === "downloading" && processingInfo.progress > 0
-                  ? t("settings.video.downloadingAudio", { progress: processingInfo.progress })
-                  : processingInfo.status === "extracting"
-                    ? t("settings.video.extractingAudio")
-                    : processingInfo.status === "transcribing"
-                      ? t("settings.video.transcribingAudio")
-                      : t("settings.video.processing")}
+                {processingInfo.status === "diarizing"
+                  ? t("settings.meeting.diarizing")
+                  : processingInfo.status === "transcribing-meeting"
+                    ? t("settings.meeting.transcribingSegment", {
+                        current: processingInfo.progress,
+                        total: processingInfo.progress, // approximate
+                      })
+                    : processingInfo.status === "downloading" && processingInfo.progress > 0
+                      ? t("settings.video.downloadingAudio", { progress: processingInfo.progress })
+                      : processingInfo.status === "extracting"
+                        ? t("settings.video.extractingAudio")
+                        : processingInfo.status === "transcribing"
+                          ? t("settings.video.transcribingAudio")
+                          : t("settings.video.processing")}
               </p>
               <div className="w-full max-w-xs bg-mid-gray/10 rounded-full h-1.5 overflow-hidden">
                 {processingInfo.status === "downloading" && processingInfo.progress > 0 ? (
@@ -2643,8 +3051,60 @@ ${linkedEntryDetails}` : ""}`;
             </div>
           )}
 
-          {/* Transcription */}
-          {!processingInfo && <div>
+          {/* Diarized transcript (for any entry with segments) */}
+          {!processingInfo && hasSegments && (
+            <div className="mb-4">
+              <label className="text-xs font-medium text-text/60 uppercase tracking-wide mb-2 block">
+                {t("settings.meeting.speaker") + "s"}
+              </label>
+              <DiarizedTranscriptView entryId={entryId} />
+            </div>
+          )}
+
+          {/* Diarization controls (visible when entry has audio) */}
+          {!processingInfo && entry.file_name && entry.file_name.endsWith(".wav") && (
+            <div className="mb-4 flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                <label className="text-[10px] text-text/50">{t("settings.meeting.expectedSpeakers")}</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={diarizeMaxSpeakers}
+                  onChange={(e) => setDiarizeMaxSpeakers(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+                  className="w-12 px-1.5 py-0.5 text-xs rounded border border-mid-gray/20 bg-background text-text"
+                />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <label className="text-[10px] text-text/50">{t("settings.meeting.threshold")}</label>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={diarizeThreshold}
+                  onChange={(e) => setDiarizeThreshold(Number(e.target.value))}
+                  className="w-20 h-1 accent-mutter-primary"
+                />
+                <span className="text-[10px] text-text/50 w-7">{diarizeThreshold.toFixed(2)}</span>
+              </div>
+              <button
+                onClick={() => handleDiarize(diarizeMaxSpeakers, diarizeThreshold)}
+                disabled={isDiarizing || processingPromptId !== null}
+                className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-md bg-mutter-primary text-white hover:bg-mutter-primary/80 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <Users className="w-3 h-3" />
+                {isDiarizing
+                  ? diarizeProgress
+                    ? `${t("settings.meeting.diarizing").replace("...", "")} (${diarizeProgress})`
+                    : t("settings.meeting.diarizing")
+                  : hasSegments ? t("settings.meeting.reDiarize") : t("settings.journal.diarize")}
+              </button>
+            </div>
+          )}
+
+          {/* Transcription (hidden for meetings — use NOMs chat instead) */}
+          {!processingInfo && !isMeetingEntry && <div>
             <div className="flex items-center justify-between">
               <label className="text-xs font-medium text-text/60 uppercase tracking-wide">
                 {t("settings.journal.transcription")}
@@ -2660,31 +3120,21 @@ ${linkedEntryDetails}` : ""}`;
             {entry.file_name && (
               <AudioPlayer onLoadRequest={getAudioUrl} className="w-full mt-1" />
             )}
-            {isEditingTranscription ? (
-              <textarea
-                autoFocus
-                value={editTranscription}
-                onChange={(e) => handleTranscriptionChange(e.target.value)}
-                onBlur={() => setIsEditingTranscription(false)}
-                className="mt-2 w-full text-text/90 text-sm bg-mid-gray/10 rounded-md p-3 min-h-[120px] resize-y focus:outline-none focus:ring-1 focus:ring-mutter-primary"
+            <div className="mt-2">
+              <JotterEditor
+                content={editTranscription}
+                onChange={handleTranscriptionChange}
+                placeholder={t("settings.journal.transcription")}
+                tags={allKnownTags}
+                entries={allEntries.map((e) => ({ id: e.id, title: e.title }))}
+                folders={allFolders.map((f) => ({ id: f.id, name: f.name }))}
               />
-            ) : (
-              <div
-                onClick={() => { setIsEditingTranscription(true); setEditTranscription(entry.transcription_text); }}
-                className="mt-2 text-text/90 text-sm select-text cursor-text bg-mid-gray/10 rounded-md p-3 hover:bg-mutter-primary/10 transition-colors [&_p]:mb-3 [&_p:last-child]:mb-0 [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:mb-3 [&_ol]:list-decimal [&_ol]:pl-4 [&_ol]:mb-3 [&_li]:mb-1 [&_h1]:text-lg [&_h1]:font-bold [&_h1]:mb-2 [&_h2]:text-base [&_h2]:font-bold [&_h2]:mb-2 [&_h3]:text-sm [&_h3]:font-bold [&_h3]:mb-1 [&_strong]:font-bold [&_a]:text-mutter-primary [&_a]:underline"
-              >
-                <Markdown remarkPlugins={[remarkBreaks, remarkGfm]}>
-                  {entry.transcription_text
-                    .replace(/^"|"$/g, "")
-                    .replace(/\\n/g, "\n")}
-                </Markdown>
-              </div>
-            )}
-            {/* Re-transcribe | prompt pipeline */}
+            </div>
+            {/* Re-transcribe | Diarize | prompt pipeline */}
             <div className="mt-2 flex items-center gap-2 flex-wrap">
               <button
                 onClick={handleRetranscribe}
-                disabled={processingPromptId !== null || isRetranscribing}
+                disabled={processingPromptId !== null || isRetranscribing || isDiarizing}
                 className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md bg-mid-gray/10 text-text/60 hover:bg-mid-gray/20 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Mic className="w-3 h-3" />
@@ -2692,7 +3142,6 @@ ${linkedEntryDetails}` : ""}`;
               </button>
               {(() => {
                 if (mutterPromptPipeline.length === 0) return null;
-                // Current pipeline level: -1 = none applied, 0 = Clean, 1 = Structure, 2 = Organise
                 const activeIdx = mutterPromptPipeline.findIndex((p) => p.label === entry.post_process_prompt_id);
                 const isBusy = processingPromptId !== null || isRetranscribing;
                 return (
@@ -2745,7 +3194,7 @@ ${linkedEntryDetails}` : ""}`;
 
       {/* Jots section — jotter sessions displayed between entry and chat history */}
       {(() => {
-        const jotSessions = chatSessions.filter((s) => s.mode === "jotter");
+        const jotSessions = chatSessions.filter((s) => s.mode === "jotter" || s.mode === "noms");
         if (jotSessions.length === 0) return null;
         return (
           <div className="space-y-2">
@@ -2795,7 +3244,7 @@ ${linkedEntryDetails}` : ""}`;
                     try {
                       const messages = await journalCommands.getChatMessages(session.id);
                       setChatSessionId(session.id);
-                      setChatMode("jotter");
+                      setChatMode(session.mode as "jotter" | "noms");
                       setChatMessages(messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })));
                       if (messages.length > 0) {
                         setJotterText(messages[messages.length - 1].content);
@@ -2831,7 +3280,7 @@ ${linkedEntryDetails}` : ""}`;
                         onClick={(e) => e.stopPropagation()}
                         onDoubleClick={(e) => { e.stopPropagation(); setRenamingSessionId(session.id); setRenameValue(session.title); }}
                       >
-                        {session.title || t("settings.journal.chatModeJotter")}
+                        {session.title || (session.mode === "noms" ? t("settings.meeting.chatModeNoms") : t("settings.journal.chatModeJotter"))}
                       </span>
                     )}
                     <span className="flex items-center gap-0.5 text-[10px] text-text/30 shrink-0">
@@ -2875,7 +3324,7 @@ ${linkedEntryDetails}` : ""}`;
 
       {/* Chat history badges — non-jotter sessions only */}
       {(() => {
-        const chatOnlySessions = chatSessions.filter((s) => s.mode !== "jotter");
+        const chatOnlySessions = chatSessions.filter((s) => s.mode !== "jotter" && s.mode !== "noms");
         if (chatOnlySessions.length === 0) return null;
         return (
           <div className="space-y-2">
@@ -2924,7 +3373,7 @@ ${linkedEntryDetails}` : ""}`;
                     try {
                       const messages = await journalCommands.getChatMessages(session.id);
                       setChatSessionId(session.id);
-                      setChatMode(session.mode as "retrieve" | "sharpen" | "brainstorm");
+                      setChatMode(session.mode as "retrieve" | "sharpen" | "brainstorm" | "synthesise");
                       setChatMessages(messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })));
                       setChatOpen(true);
                     } catch (error) {
@@ -2934,7 +3383,7 @@ ${linkedEntryDetails}` : ""}`;
                 >
                   <div className="flex items-center gap-1.5 min-w-0 flex-1">
                     <span className="px-1.5 py-0.5 bg-mutter-primary/15 text-mutter-primary text-[10px] rounded-full font-medium shrink-0">
-                      {session.mode === "retrieve" ? t("settings.journal.chatModeRetrieve") : session.mode === "sharpen" ? t("settings.journal.chatModeSharpen") : t("settings.journal.chatModeBrainstorm")}
+                      {session.mode === "retrieve" ? t("settings.journal.chatModeRetrieve") : session.mode === "synthesise" ? t("settings.meeting.chatModeSynthesise") : session.mode === "sharpen" ? t("settings.journal.chatModeSharpen") : t("settings.journal.chatModeBrainstorm")}
                     </span>
                     {renamingSessionId === session.id ? (
                       <input
@@ -3022,12 +3471,15 @@ ${linkedEntryDetails}` : ""}`;
           {/* Chat header */}
           <div className="flex items-center justify-between px-3 py-2 border-b border-mid-gray/20 shrink-0">
             <div className="flex items-center gap-1 min-w-0 flex-1">
-              <span className="text-xs font-medium text-text/70 shrink-0">{t("settings.journal.chatAssistant")}</span>
+              <button
+                onClick={() => { setChatMessages([]); setChatInput(""); setChatMode(null); setChatSessionId(null); setJotterText(""); }}
+                className="text-xs font-medium text-text/70 shrink-0 hover:text-mutter-primary hover:underline cursor-pointer"
+              >{t("settings.journal.chatAssistant")}</button>
               {chatMode && (
                 <>
                   <ChevronRight className="w-3 h-3 text-text/30 shrink-0" />
                   <span className="px-1.5 py-0.5 bg-mutter-primary/15 text-mutter-primary text-[10px] rounded-full font-medium shrink-0">
-                    {chatMode === "jotter" ? t("settings.journal.chatModeJotter") : chatMode === "retrieve" ? t("settings.journal.chatModeRetrieve") : chatMode === "sharpen" ? t("settings.journal.chatModeSharpen") : t("settings.journal.chatModeBrainstorm")}
+                    {chatMode === "jotter" ? t("settings.journal.chatModeJotter") : chatMode === "noms" ? t("settings.meeting.chatModeNoms") : chatMode === "retrieve" ? t("settings.journal.chatModeRetrieve") : chatMode === "synthesise" ? t("settings.meeting.chatModeSynthesise") : chatMode === "sharpen" ? t("settings.journal.chatModeSharpen") : t("settings.journal.chatModeBrainstorm")}
                   </span>
                 </>
               )}
@@ -3075,48 +3527,82 @@ ${linkedEntryDetails}` : ""}`;
                 <MessageCircle className="w-6 h-6 text-mutter-primary/30 shrink-0" />
                 <p className="text-xs text-text/40 shrink-0">{t("settings.journal.chatPickMode")}</p>
                 <div className="grid grid-cols-2 gap-2 w-full">
-                  <button
-                    onClick={() => { setChatMode("jotter"); setJotterText(""); }}
-                    className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-lg border border-mid-gray/20 hover:border-mutter-primary/50 hover:bg-mutter-primary/5 transition-colors cursor-pointer text-center"
-                  >
-                    <div className="w-7 h-7 rounded-full bg-mutter-primary/15 flex items-center justify-center shrink-0">
-                      <Pencil className="w-3.5 h-3.5 text-mutter-primary" />
-                    </div>
-                    <p className="text-xs font-medium">{t("settings.journal.chatModeJotter")}</p>
-                    <p className="text-[9px] text-text/40 leading-tight">{t("settings.journal.chatModeJotterDesc")}</p>
-                  </button>
-                  <button
-                    onClick={() => setChatMode("retrieve")}
-                    className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-lg border border-mid-gray/20 hover:border-mutter-primary/50 hover:bg-mutter-primary/5 transition-colors cursor-pointer text-center"
-                  >
-                    <div className="w-7 h-7 rounded-full bg-mutter-primary/15 flex items-center justify-center shrink-0">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-mutter-primary"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-                    </div>
-                    <p className="text-xs font-medium">{t("settings.journal.chatModeRetrieve")}</p>
-                    <p className="text-[9px] text-text/40 leading-tight">{t("settings.journal.chatModeRetrieveDesc")}</p>
-                  </button>
-                  <button
-                    onClick={() => setChatMode("sharpen")}
-                    className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-lg border border-mid-gray/20 hover:border-mutter-primary/50 hover:bg-mutter-primary/5 transition-colors cursor-pointer text-center"
-                  >
-                    <div className="w-7 h-7 rounded-full bg-mutter-primary/15 flex items-center justify-center shrink-0">
-                      <Pencil className="w-3.5 h-3.5 text-mutter-primary" />
-                    </div>
-                    <p className="text-xs font-medium">{t("settings.journal.chatModeSharpen")}</p>
-                    <p className="text-[9px] text-text/40 leading-tight">{t("settings.journal.chatModeSharpenDesc")}</p>
-                  </button>
-                  <button
-                    onClick={() => setChatMode("brainstorm")}
-                    className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-lg border border-mid-gray/20 hover:border-mutter-primary/50 hover:bg-mutter-primary/5 transition-colors cursor-pointer text-center"
-                  >
-                    <div className="w-7 h-7 rounded-full bg-mutter-primary/15 flex items-center justify-center shrink-0">
-                      <Lightbulb className="w-3.5 h-3.5 text-mutter-primary" />
-                    </div>
-                    <p className="text-xs font-medium">{t("settings.journal.chatModeBrainstorm")}</p>
-                    <p className="text-[9px] text-text/40 leading-tight">{t("settings.journal.chatModeBrainstormDesc")}</p>
-                  </button>
+                  {isMeetingEntry ? (
+                    <>
+                      <button
+                        onClick={() => { setChatMode("noms"); setJotterText(""); }}
+                        className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-lg border border-mid-gray/20 hover:border-mutter-primary/50 hover:bg-mutter-primary/5 transition-colors cursor-pointer text-center"
+                      >
+                        <div className="w-7 h-7 rounded-full bg-mutter-primary/15 flex items-center justify-center shrink-0">
+                          <Pencil className="w-3.5 h-3.5 text-mutter-primary" />
+                        </div>
+                        <p className="text-xs font-medium">{t("settings.meeting.chatModeNoms")}</p>
+                        <p className="text-[9px] text-text/40 leading-tight">{t("settings.meeting.chatModeNomsDesc")}</p>
+                      </button>
+                      <button
+                        onClick={() => setChatMode("synthesise")}
+                        className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-lg border border-mid-gray/20 hover:border-mutter-primary/50 hover:bg-mutter-primary/5 transition-colors cursor-pointer text-center"
+                      >
+                        <div className="w-7 h-7 rounded-full bg-mutter-primary/15 flex items-center justify-center shrink-0">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-mutter-primary"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+                        </div>
+                        <p className="text-xs font-medium">{t("settings.meeting.chatModeSynthesise")}</p>
+                        <p className="text-[9px] text-text/40 leading-tight">{t("settings.meeting.chatModeSynthesiseDesc")}</p>
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => { setChatMode("jotter"); setJotterText(""); }}
+                        className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-lg border border-mid-gray/20 hover:border-mutter-primary/50 hover:bg-mutter-primary/5 transition-colors cursor-pointer text-center"
+                      >
+                        <div className="w-7 h-7 rounded-full bg-mutter-primary/15 flex items-center justify-center shrink-0">
+                          <Pencil className="w-3.5 h-3.5 text-mutter-primary" />
+                        </div>
+                        <p className="text-xs font-medium">{t("settings.journal.chatModeJotter")}</p>
+                        <p className="text-[9px] text-text/40 leading-tight">{t("settings.journal.chatModeJotterDesc")}</p>
+                      </button>
+                      <button
+                        onClick={() => setChatMode("retrieve")}
+                        className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-lg border border-mid-gray/20 hover:border-mutter-primary/50 hover:bg-mutter-primary/5 transition-colors cursor-pointer text-center"
+                      >
+                        <div className="w-7 h-7 rounded-full bg-mutter-primary/15 flex items-center justify-center shrink-0">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-mutter-primary"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+                        </div>
+                        <p className="text-xs font-medium">{t("settings.journal.chatModeRetrieve")}</p>
+                        <p className="text-[9px] text-text/40 leading-tight">{t("settings.journal.chatModeRetrieveDesc")}</p>
+                      </button>
+                      <button
+                        onClick={() => setChatMode("sharpen")}
+                        className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-lg border border-mid-gray/20 hover:border-mutter-primary/50 hover:bg-mutter-primary/5 transition-colors cursor-pointer text-center"
+                      >
+                        <div className="w-7 h-7 rounded-full bg-mutter-primary/15 flex items-center justify-center shrink-0">
+                          <Pencil className="w-3.5 h-3.5 text-mutter-primary" />
+                        </div>
+                        <p className="text-xs font-medium">{t("settings.journal.chatModeSharpen")}</p>
+                        <p className="text-[9px] text-text/40 leading-tight">{t("settings.journal.chatModeSharpenDesc")}</p>
+                      </button>
+                      <button
+                        onClick={() => setChatMode("brainstorm")}
+                        className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-lg border border-mid-gray/20 hover:border-mutter-primary/50 hover:bg-mutter-primary/5 transition-colors cursor-pointer text-center"
+                      >
+                        <div className="w-7 h-7 rounded-full bg-mutter-primary/15 flex items-center justify-center shrink-0">
+                          <Lightbulb className="w-3.5 h-3.5 text-mutter-primary" />
+                        </div>
+                        <p className="text-xs font-medium">{t("settings.journal.chatModeBrainstorm")}</p>
+                        <p className="text-[9px] text-text/40 leading-tight">{t("settings.journal.chatModeBrainstormDesc")}</p>
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
+            ) : chatMode === "noms" ? (
+              <NomsEditor
+                entry={entry}
+                jotterText={jotterText}
+                onJotterChange={handleJotterChange}
+                promptOverrides={promptOverrides}
+              />
             ) : chatMode === "jotter" ? (
               <div className="flex flex-col h-full">
                 <JotterEditor
@@ -3599,6 +4085,440 @@ const YouTubeInputView: React.FC<{
           </div>
         </div>
       </div>
+    </div>
+  );
+};
+
+// --- NOMs Editor (meeting minutes canvas with context input) ---
+
+const NomsEditor: React.FC<{
+  entry: JournalEntry | null;
+  jotterText: string;
+  onJotterChange: (text: string) => void;
+  promptOverrides: import("@/stores/mutterStore").MutterPromptOverrides;
+}> = ({ entry, jotterText, onJotterChange, promptOverrides }) => {
+  const { t } = useTranslation();
+  const [meetingName, setMeetingName] = useState("");
+  const [attendees, setAttendees] = useState("");
+  const [meetingDate, setMeetingDate] = useState("");
+  const [additionalContext, setAdditionalContext] = useState("");
+  const [generating, setGenerating] = useState(false);
+  const [contextCollapsed, setContextCollapsed] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-populate date from entry timestamp
+  useEffect(() => {
+    if (entry && !meetingDate) {
+      const d = new Date(entry.timestamp * 1000);
+      setMeetingDate(d.toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }));
+    }
+  }, [entry]);
+
+  const handleGenerate = async () => {
+    if (!entry) return;
+    setGenerating(true);
+    try {
+      const nomsPrompt = promptOverrides.minutes ?? MEETING_PROMPTS[0].prompt;
+
+      // Build context block
+      const contextLines: string[] = [];
+      if (meetingName.trim()) contextLines.push(`Meeting: ${meetingName.trim()}`);
+      if (meetingDate.trim()) contextLines.push(`Date: ${meetingDate.trim()}`);
+      if (attendees.trim()) contextLines.push(`Attendees:\n${attendees.trim()}`);
+      if (additionalContext.trim()) contextLines.push(`Additional context:\n${additionalContext.trim()}`);
+
+      const contextBlock = contextLines.length > 0
+        ? `\n\n=== MEETING CONTEXT ===\n${contextLines.join("\n\n")}\n`
+        : "";
+
+      // Substitute speaker names into transcript
+      const speakerNames = await meetingCommands.getSpeakerNames(entry.id);
+      let transcript = entry.transcription_text;
+      for (const [id, name] of Object.entries(speakerNames)) {
+        if (name) {
+          transcript = transcript.split(`[Speaker ${id}]`).join(`[${name}]`);
+        }
+      }
+
+      // Replace ${output} with transcript + context
+      const fullPrompt = nomsPrompt.replace("${output}", contextBlock + "\n" + transcript);
+
+      const history: [string, string][] = [["user", fullPrompt]];
+      const result = await journalCommands.chat(history);
+      onJotterChange(result);
+      setContextCollapsed(true);
+    } catch (error) {
+      console.error("Failed to generate NOMs:", error);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col h-full gap-3">
+      {/* Meeting context section */}
+      <div className="shrink-0 border-b border-mid-gray/10 pb-3">
+        <button
+          onClick={() => setContextCollapsed(!contextCollapsed)}
+          className="flex items-center gap-1.5 text-xs font-medium text-text/60 uppercase tracking-wide mb-2 cursor-pointer hover:text-text/80"
+        >
+          <ChevronRight className={`w-3 h-3 transition-transform ${contextCollapsed ? "" : "rotate-90"}`} />
+          {t("settings.meeting.nomsContext")}
+        </button>
+        {!contextCollapsed && (
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] text-text/40 block mb-0.5">{t("settings.meeting.nomsName")}</label>
+                <input
+                  value={meetingName}
+                  onChange={(e) => setMeetingName(e.target.value)}
+                  placeholder={t("settings.meeting.nomsNamePlaceholder")}
+                  className="w-full px-2 py-1.5 text-xs bg-background border border-mid-gray/20 rounded-md focus:outline-none focus:border-mutter-primary"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] text-text/40 block mb-0.5">{t("settings.meeting.nomsDate")}</label>
+                <input
+                  value={meetingDate}
+                  onChange={(e) => setMeetingDate(e.target.value)}
+                  className="w-full px-2 py-1.5 text-xs bg-background border border-mid-gray/20 rounded-md focus:outline-none focus:border-mutter-primary"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="text-[10px] text-text/40 block mb-0.5">{t("settings.meeting.nomsAttendees")}</label>
+              <textarea
+                value={attendees}
+                onChange={(e) => setAttendees(e.target.value)}
+                placeholder={t("settings.meeting.nomsAttendeesPlaceholder")}
+                rows={3}
+                className="w-full px-2 py-1.5 text-xs bg-background border border-mid-gray/20 rounded-md focus:outline-none focus:border-mutter-primary resize-none"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-text/40 block mb-0.5">{t("settings.meeting.nomsAdditional")}</label>
+              <textarea
+                value={additionalContext}
+                onChange={(e) => setAdditionalContext(e.target.value)}
+                placeholder={t("settings.meeting.nomsAdditionalPlaceholder")}
+                rows={2}
+                className="w-full px-2 py-1.5 text-xs bg-background border border-mid-gray/20 rounded-md focus:outline-none focus:border-mutter-primary resize-none"
+              />
+            </div>
+            <MutterButton
+              onClick={handleGenerate}
+              disabled={generating || !entry?.transcription_text}
+              size="sm"
+              className="flex items-center gap-1.5 w-full justify-center"
+            >
+              {generating ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  {t("settings.meeting.nomsGenerating")}
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-3.5 h-3.5" />
+                  {t("settings.meeting.nomsGenerate")}
+                </>
+              )}
+            </MutterButton>
+          </div>
+        )}
+      </div>
+
+      {/* NOMs canvas — preview / edit toggle */}
+      <div className="flex-1 min-h-0 flex flex-col">
+        {jotterText && (
+          <div className="flex items-center justify-end gap-1 mb-1 shrink-0">
+            <button
+              onClick={() => setEditMode(!editMode)}
+              className={`p-1 rounded transition-colors cursor-pointer ${editMode ? "text-mutter-primary bg-mutter-primary/10" : "text-text/40 hover:text-text/60 hover:bg-mid-gray/10"}`}
+              title={editMode ? t("settings.meeting.nomsPreview") : t("settings.meeting.nomsEdit")}
+            >
+              {editMode ? <Eye className="w-3.5 h-3.5" /> : <Pencil className="w-3.5 h-3.5" />}
+            </button>
+          </div>
+        )}
+        <div className="flex-1 overflow-y-auto">
+          {editMode ? (
+            <textarea
+              ref={textareaRef}
+              value={jotterText}
+              onChange={(e) => onJotterChange(e.target.value)}
+              className="w-full h-full text-xs text-text/80 bg-background border border-mid-gray/20 rounded-md p-3 resize-none focus:outline-none focus:border-mutter-primary font-mono"
+              placeholder={t("settings.meeting.nomsPlaceholder")}
+            />
+          ) : jotterText ? (
+            <div className="text-sm text-text/90 select-text [&_p]:mb-3 [&_p:last-child]:mb-0 [&_ul]:list-disc [&_ul]:pl-4 [&_ul]:mb-3 [&_ol]:list-decimal [&_ol]:pl-4 [&_ol]:mb-3 [&_li]:mb-1 [&_h1]:text-lg [&_h1]:font-bold [&_h1]:mb-2 [&_h2]:text-base [&_h2]:font-bold [&_h2]:mb-2 [&_h3]:text-sm [&_h3]:font-bold [&_h3]:mb-1 [&_strong]:font-bold [&_em]:italic [&_a]:text-mutter-primary [&_a]:underline [&_table]:w-full [&_table]:border-collapse [&_table]:text-xs [&_table]:mb-3 [&_th]:border [&_th]:border-mid-gray/20 [&_th]:px-2 [&_th]:py-1.5 [&_th]:bg-mid-gray/10 [&_th]:text-left [&_th]:font-semibold [&_td]:border [&_td]:border-mid-gray/20 [&_td]:px-2 [&_td]:py-1.5 [&_td]:align-top [&_hr]:my-3 [&_hr]:border-mid-gray/20 [&_blockquote]:border-l-2 [&_blockquote]:border-mutter-primary/30 [&_blockquote]:pl-3 [&_blockquote]:text-text/60 [&_blockquote]:mb-3">
+              <Markdown remarkPlugins={[remarkBreaks, remarkGfm]}>
+                {jotterText}
+              </Markdown>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-xs text-text/30">{t("settings.meeting.nomsPlaceholder")}</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- Meeting New Entry View ---
+
+const MeetingNewEntryView: React.FC<{
+  onRecord: () => void;
+  onImport: () => void;
+  onCancel: () => void;
+}> = ({ onRecord, onImport, onCancel }) => {
+  const { t } = useTranslation();
+  const [modelsInstalled, setModelsInstalled] = useState<boolean | null>(null);
+  const [installing, setInstalling] = useState(false);
+  const [downloadLabel, setDownloadLabel] = useState("");
+  const [downloadProgress, setDownloadProgress] = useState(0);
+
+  useEffect(() => {
+    meetingCommands.checkDiarizeModelsInstalled().then(setModelsInstalled);
+  }, []);
+
+  useEffect(() => {
+    if (!installing) return;
+    let unlisten: (() => void) | undefined;
+    listen<{ label: string; progress: number }>("diarize-download-progress", (event) => {
+      const { label, progress } = event.payload;
+      if (label !== "done") {
+        setDownloadLabel(label);
+        setDownloadProgress(progress);
+      }
+    }).then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, [installing]);
+
+  const handleInstallModels = async () => {
+    setInstalling(true);
+    setDownloadLabel("");
+    setDownloadProgress(0);
+    try {
+      await meetingCommands.installDiarizeModels();
+      setModelsInstalled(true);
+    } catch (error) {
+      console.error("Failed to install diarize models:", error);
+      toast.error(String(error));
+    } finally {
+      setInstalling(false);
+    }
+  };
+
+  return (
+    <div className="px-4">
+      <div className="bg-background border border-mid-gray/20 rounded-lg p-8 flex flex-col items-center gap-6 max-w-md mx-auto">
+        <div className="w-16 h-16 rounded-full bg-mutter-primary/15 flex items-center justify-center">
+          <Users className="w-8 h-8 text-mutter-primary" />
+        </div>
+        <div className="text-center space-y-1">
+          <h3 className="text-sm font-semibold">{t("settings.meeting.setup.title")}</h3>
+          <p className="text-xs text-text/50">{t("settings.meeting.setup.description")}</p>
+        </div>
+
+        {modelsInstalled === null ? (
+          <Loader2 className="w-5 h-5 text-mutter-primary animate-spin" />
+        ) : !modelsInstalled ? (
+          <div className="flex flex-col items-center gap-3 w-full max-w-xs">
+            <MutterButton
+              onClick={handleInstallModels}
+              disabled={installing}
+              size="md"
+              className="flex items-center gap-2"
+            >
+              {installing ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  {t("settings.meeting.setup.installing")}
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4" />
+                  {t("settings.meeting.setup.installModels")}
+                </>
+              )}
+            </MutterButton>
+            {installing && downloadLabel && (
+              <div className="w-full space-y-1.5">
+                <p className="text-[11px] text-text/40 text-center">
+                  {t(`settings.meeting.setup.model.${downloadLabel}`)} — {downloadProgress}%
+                </p>
+                <div className="w-full bg-mid-gray/10 rounded-full h-1 overflow-hidden">
+                  <div
+                    className="h-full bg-mutter-primary rounded-full transition-all duration-300"
+                    style={{ width: `${downloadProgress}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col items-center gap-3 w-full">
+            <p className="text-xs text-green-600">{t("settings.meeting.setup.ready")}</p>
+            <div className="flex gap-4 w-full max-w-sm">
+              <button
+                onClick={onRecord}
+                className="flex-1 flex flex-col items-center gap-3 p-5 rounded-lg border-2 border-dashed border-mid-gray/20 hover:border-mutter-primary/50 hover:bg-mutter-primary/5 transition-colors cursor-pointer"
+              >
+                <div className="w-12 h-12 rounded-full bg-red-500/15 flex items-center justify-center">
+                  <Mic className="w-6 h-6 text-red-500" />
+                </div>
+                <div className="text-center">
+                  <p className="text-xs font-medium">{t("settings.meeting.startMeeting")}</p>
+                  <p className="text-[10px] text-text/40 mt-0.5">{t("settings.meeting.startMeetingDesc")}</p>
+                </div>
+              </button>
+              <button
+                onClick={onImport}
+                className="flex-1 flex flex-col items-center gap-3 p-5 rounded-lg border-2 border-dashed border-mid-gray/20 hover:border-mutter-primary/50 hover:bg-mutter-primary/5 transition-colors cursor-pointer"
+              >
+                <div className="w-12 h-12 rounded-full bg-mutter-primary/15 flex items-center justify-center">
+                  <Upload className="w-6 h-6 text-mutter-primary" />
+                </div>
+                <div className="text-center">
+                  <p className="text-xs font-medium">{t("settings.meeting.importAudio")}</p>
+                  <p className="text-[10px] text-text/40 mt-0.5">{t("settings.meeting.importAudioDesc")}</p>
+                </div>
+              </button>
+            </div>
+          </div>
+        )}
+
+        <button
+          onClick={onCancel}
+          className="text-xs text-text/40 hover:text-text/60 cursor-pointer"
+        >
+          {t("common.cancel")}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// --- Diarized Transcript View ---
+
+const SPEAKER_COLORS = [
+  "text-blue-600",
+  "text-green-600",
+  "text-orange-500",
+  "text-purple-600",
+  "text-pink-600",
+  "text-teal-600",
+];
+
+const SPEAKER_DOT_COLORS = [
+  "bg-blue-500",
+  "bg-green-500",
+  "bg-orange-500",
+  "bg-purple-500",
+  "bg-pink-500",
+  "bg-teal-500",
+];
+
+function formatMs(ms: number): string {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+export const DiarizedTranscriptView: React.FC<{
+  entryId: number;
+}> = ({ entryId }) => {
+  const { t } = useTranslation();
+  const [segments, setSegments] = useState<MeetingSegment[]>([]);
+  const [speakerNames, setSpeakerNames] = useState<Record<string, string>>({});
+  const [editingSpeaker, setEditingSpeaker] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
+
+  useEffect(() => {
+    meetingCommands.getSegments(entryId).then(setSegments);
+    meetingCommands.getSpeakerNames(entryId).then(setSpeakerNames);
+  }, [entryId]);
+
+  const handleRenameSpeaker = async (speakerId: number) => {
+    const name = editName.trim();
+    if (!name) return;
+    try {
+      await meetingCommands.updateSpeakerName(entryId, speakerId, name);
+      setSpeakerNames((prev) => ({ ...prev, [String(speakerId)]: name }));
+    } catch (error) {
+      console.error("Failed to rename speaker:", error);
+    }
+    setEditingSpeaker(null);
+    setEditName("");
+  };
+
+  const getSpeakerLabel = (speaker: number | null): string => {
+    if (speaker === null) return t("settings.meeting.speaker");
+    const name = speakerNames[String(speaker)];
+    return name || `${t("settings.meeting.speaker")} ${speaker}`;
+  };
+
+  if (segments.length === 0) return null;
+
+  // Detect unique speakers
+  const uniqueSpeakers = new Set(segments.map((s) => s.speaker).filter((s) => s !== null));
+
+  return (
+    <div className="space-y-1">
+      {uniqueSpeakers.size > 0 && (
+        <p className="text-xs text-text/40 mb-3">
+          {t("settings.meeting.speakersDetected", { count: uniqueSpeakers.size })}
+        </p>
+      )}
+      {segments.map((seg, i) => {
+        const colorIdx = (seg.speaker ?? 0) % SPEAKER_COLORS.length;
+        return (
+          <div key={i} className="flex gap-3 py-2">
+            <div className="flex flex-col items-center shrink-0 w-14">
+              <span className="text-[10px] text-text/30 font-mono">
+                {formatMs(seg.start_ms)}
+              </span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <span className={`w-2 h-2 rounded-full shrink-0 ${SPEAKER_DOT_COLORS[colorIdx]}`} />
+                {editingSpeaker === seg.speaker ? (
+                  <input
+                    autoFocus
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleRenameSpeaker(seg.speaker!);
+                      if (e.key === "Escape") setEditingSpeaker(null);
+                    }}
+                    onBlur={() => handleRenameSpeaker(seg.speaker!)}
+                    className="text-xs font-semibold bg-transparent border-b border-mutter-primary outline-none px-0 py-0 w-32"
+                  />
+                ) : (
+                  <button
+                    onClick={() => {
+                      if (seg.speaker !== null) {
+                        setEditingSpeaker(seg.speaker);
+                        setEditName(speakerNames[String(seg.speaker)] || "");
+                      }
+                    }}
+                    className={`text-xs font-semibold cursor-pointer hover:underline ${SPEAKER_COLORS[colorIdx]}`}
+                    title={t("settings.meeting.renameSpeaker")}
+                  >
+                    {getSpeakerLabel(seg.speaker)}
+                  </button>
+                )}
+              </div>
+              <p className="text-sm text-text/80 leading-relaxed">{seg.text}</p>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 };

@@ -453,6 +453,9 @@
       "chatContextClickToEdit": "Click to set max context",
       "retranscribe": "Re-transcribe",
       "retranscribing": "Re-transcribing...",
+      "diarize": "Diarize",
+      "userSource": "Source",
+      "userSourcePlaceholder": "e.g. interview, podcast, lecture...",
       "applyingPrompt": "Applying...",
       "folder": "Folder",
       "noFolder": "No folder",
@@ -484,6 +487,8 @@
         "helpColonsExamples": "today, this week, jan 2025, 2025-01",
         "helpBracketsSyntax": "[name]",
         "helpBrackets": "find entries linked to a name",
+        "helpSourceSyntax": "/s",
+        "helpSource": "search by source",
         "results": "Search Results"
       },
       "welcome": {
@@ -491,13 +496,66 @@
         "description": "Your voice journal. Record voice notes, get instant transcripts, summarise your thoughts with AI, and organise everything into folders.",
         "createFirstFolder": "Create your first folder to get started"
       },
+      "folderChat": {
+        "title": "Chat about this folder",
+        "welcome": "Ask questions about entries in this folder"
+      },
       "folders": {
         "title": "Folders",
         "entryCount_one": "{{count}} entry",
         "entryCount_other": "{{count}} entries",
         "emptyFolder": "No entries yet. Record your first voice note!",
-        "emptyFolderVideo": "No entries yet. Import your first video!"
+        "emptyFolderVideo": "No entries yet. Import your first video!",
+        "emptyFolderMeeting": "No entries yet. Record your first meeting!"
       }
+    },
+    "meeting": {
+      "setup": {
+        "title": "Meeting Recording",
+        "description": "Record meetings with speaker identification",
+        "installModels": "Download speaker identification models (~30MB)",
+        "installing": "Downloading...",
+        "ready": "Ready to record",
+        "model": {
+          "segmentation": "Voice segmentation model",
+          "embedding": "Speaker identification model"
+        }
+      },
+      "startMeeting": "Record",
+      "startMeetingDesc": "Record a meeting live",
+      "importAudio": "Import WAV",
+      "importAudioDesc": "Import a recorded meeting file",
+      "speaker": "Speaker",
+      "expectedSpeakers": "Speakers",
+      "threshold": "Threshold",
+      "reDiarize": "Re-diarize",
+      "speakersDetected": "{{count}} speakers detected",
+      "renameSpeaker": "Rename speaker",
+      "processing": "Processing meeting audio...",
+      "diarizing": "Identifying speakers...",
+      "transcribingSegment": "Transcribing segment {{current}} of {{total}}...",
+      "welcome": {
+        "title": "Meeting Transcripts",
+        "description": "Record meetings with automatic speaker identification. Each speaker's words are labelled separately.",
+        "createFirstFolder": "Create your first folder"
+      },
+      "chatModeNoms": "NOMs",
+      "chatModeNomsDesc": "Draft Notes of Meeting on the canvas",
+      "chatModeSynthesise": "Synthesise",
+      "chatModeSynthesiseDesc": "Retrieve information and generate follow-up actions",
+      "nomsContext": "Meeting Context",
+      "nomsName": "Meeting Name / Platform",
+      "nomsNamePlaceholder": "e.g. Weekly PS-Huddle",
+      "nomsDate": "Date",
+      "nomsAttendees": "Attendees",
+      "nomsAttendeesPlaceholder": "Name / Designation (Organisation)\ne.g. Raymond Chua / Chief Executive (HSA)",
+      "nomsAdditional": "Additional Context",
+      "nomsAdditionalPlaceholder": "Any relevant background, agenda items, or notes",
+      "nomsGenerate": "Generate NOMs",
+      "nomsGenerating": "Generating...",
+      "nomsPlaceholder": "Your Notes of Meeting will appear here...",
+      "nomsPreview": "Switch to preview",
+      "nomsEdit": "Switch to edit"
     },
     "video": {
       "youtube": "YouTube",
@@ -652,7 +710,8 @@
   "mutter": {
     "tabs": {
       "journal": "Journal",
-      "video": "Video"
+      "video": "Video",
+      "meeting": "Meetings"
     },
     "settings": {
       "title": "Mutter Settings",
@@ -664,9 +723,11 @@
       "structure": "Structure",
       "organise": "Organise",
       "report": "Report",
+      "minutes": "Minutes",
       "retrieve": "Retrieve",
       "sharpen": "Sharpen",
       "brainstorm": "Brainstorm",
+      "synthesise": "Synthesise",
       "resetToDefault": "Reset to default",
       "customised": "Customised",
       "storageLocation": "Storage Location",

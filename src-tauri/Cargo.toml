@@ -70,6 +70,7 @@ tar = "0.4.44"
 flate2 = "1.0"
 transcribe-rs = { version = "0.2.5", features = ["whisper", "parakeet", "moonshine", "sense_voice"] }
 symphonia = { version = "0.5", features = ["isomp4", "mkv", "aac", "mp3", "vorbis", "pcm"] }
+pyannote-rs = "0.3.4"
 handy-keys = "0.2.1"
 ferrous-opencc = "0.2.3"
 clap = { version = "4", features = ["derive"] }

@@ -268,7 +268,11 @@ pub async fn download_audio(
 /// Get the title of a YouTube video via yt-dlp --get-title.
 pub async fn get_video_title(app: &AppHandle, url: &str) -> Result<String, String> {
     let ytdlp_path = get_ytdlp_path(app)?;
-    info!("get_video_title: binary={}, exists={}", ytdlp_path.display(), ytdlp_path.exists());
+    info!(
+        "get_video_title: binary={}, exists={}",
+        ytdlp_path.display(),
+        ytdlp_path.exists()
+    );
 
     if !ytdlp_path.exists() {
         return Err("yt-dlp is not installed".to_string());

@@ -5,6 +5,7 @@ import { open as openFolderDialog } from "@tauri-apps/plugin-dialog";
 import { toast } from "sonner";
 import {
   MUTTER_DEFAULT_PROMPTS,
+  MEETING_PROMPTS,
   MUTTER_DEFAULT_CHAT_INSTRUCTIONS,
   journalCommands,
 } from "@/lib/journal";
@@ -117,6 +118,7 @@ export const MutterSettings: React.FC<MutterSettingsProps> = () => {
   const defaultStructure = MUTTER_DEFAULT_PROMPTS.find((p) => p.name === "Structure")!.prompt;
   const defaultOrganise = MUTTER_DEFAULT_PROMPTS.find((p) => p.name === "Organise")!.prompt;
   const defaultReport = MUTTER_DEFAULT_PROMPTS.find((p) => p.name === "Report")!.prompt;
+  const defaultMinutes = MEETING_PROMPTS.find((p) => p.name === "Minutes")!.prompt;
 
   return (
     <div className="w-full max-w-2xl space-y-6">
@@ -189,6 +191,14 @@ export const MutterSettings: React.FC<MutterSettingsProps> = () => {
             onChange={(v) => setPromptOverride("report", v)}
             onReset={() => setPromptOverride("report", undefined)}
           />
+          <PromptEditor
+            label={t("mutter.settings.minutes")}
+            value={promptOverrides.minutes ?? defaultMinutes}
+            defaultValue={defaultMinutes}
+            isCustomised={promptOverrides.minutes !== undefined}
+            onChange={(v) => setPromptOverride("minutes", v)}
+            onReset={() => setPromptOverride("minutes", undefined)}
+          />
         </div>
       </div>
 
@@ -226,6 +236,14 @@ export const MutterSettings: React.FC<MutterSettingsProps> = () => {
             isCustomised={promptOverrides.brainstorm !== undefined}
             onChange={(v) => setPromptOverride("brainstorm", v)}
             onReset={() => setPromptOverride("brainstorm", undefined)}
+          />
+          <PromptEditor
+            label={t("mutter.settings.synthesise")}
+            value={promptOverrides.synthesise ?? MUTTER_DEFAULT_CHAT_INSTRUCTIONS.synthesise}
+            defaultValue={MUTTER_DEFAULT_CHAT_INSTRUCTIONS.synthesise}
+            isCustomised={promptOverrides.synthesise !== undefined}
+            onChange={(v) => setPromptOverride("synthesise", v)}
+            onReset={() => setPromptOverride("synthesise", undefined)}
           />
         </div>
       </div>

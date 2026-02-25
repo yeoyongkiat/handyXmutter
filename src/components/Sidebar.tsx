@@ -30,7 +30,7 @@ import {
 } from "./settings";
 import { listen } from "@tauri-apps/api/event";
 import mutterLogo from "@/assets/mutter-logo.png";
-import { journalCommands, type JournalEntry, type JournalFolder } from "@/lib/journal";
+import { journalCommands, videoCommands, meetingCommands, type JournalEntry, type JournalFolder } from "@/lib/journal";
 import { useMutterStore } from "@/stores/mutterStore";
 import { formatDateShort } from "@/utils/dateFormat";
 
@@ -213,9 +213,17 @@ const MutterFileExplorer: React.FC = () => {
   const { t } = useTranslation();
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [folders, setFolders] = useState<JournalFolder[]>([]);
-  const selectedEntryId = useMutterStore((s) => s.selectedEntryId);
-  const setSelectedEntryId = useMutterStore((s) => s.setSelectedEntryId);
-  const setSelectedFolderId = useMutterStore((s) => s.setSelectedFolderId);
+  const activeTab = useMutterStore((s) => s.activeTab);
+  const cmds = activeTab === "video" ? videoCommands : activeTab === "meeting" ? meetingCommands : journalCommands;
+  const selectedEntryId = useMutterStore((s) =>
+    activeTab === "video" ? s.selectedVideoEntryId : activeTab === "meeting" ? s.selectedMeetingEntryId : s.selectedEntryId
+  );
+  const setSelectedEntryId = useMutterStore((s) =>
+    activeTab === "video" ? s.setSelectedVideoEntryId : activeTab === "meeting" ? s.setSelectedMeetingEntryId : s.setSelectedEntryId
+  );
+  const setSelectedFolderId = useMutterStore((s) =>
+    activeTab === "video" ? s.setSelectedVideoFolderId : activeTab === "meeting" ? s.setSelectedMeetingFolderId : s.setSelectedFolderId
+  );
   const expandedFolderIds = useMutterStore((s) => s.expandedFolderIds);
   const toggleFolder = useMutterStore((s) => s.toggleFolder);
   const searchQuery = useMutterStore((s) => s.searchQuery);
@@ -296,15 +304,15 @@ const MutterFileExplorer: React.FC = () => {
   const loadData = useCallback(async () => {
     try {
       const [entryData, folderData] = await Promise.all([
-        journalCommands.getEntries(),
-        journalCommands.getFolders(),
+        cmds.getEntries(),
+        cmds.getFolders(),
       ]);
       setEntries(entryData);
       setFolders(folderData);
     } catch (error) {
       console.error("Failed to load journal data:", error);
     }
-  }, []);
+  }, [cmds]);
 
   useEffect(() => {
     loadData();
@@ -509,6 +517,10 @@ const SearchHelpPopup: React.FC<{ anchorRef: React.RefObject<HTMLDivElement | nu
         <div className="flex items-baseline gap-2">
           <code className="text-[10px] bg-mutter-primary/10 text-mutter-primary px-1 py-0.5 rounded font-mono shrink-0">{t("settings.journal.search.helpBracketsSyntax")}</code>
           <span className="text-[10px] text-text/50">{t("settings.journal.search.helpBrackets")}</span>
+        </div>
+        <div className="flex items-baseline gap-2">
+          <code className="text-[10px] bg-mutter-primary/10 text-mutter-primary px-1 py-0.5 rounded font-mono shrink-0">{t("settings.journal.search.helpSourceSyntax")}</code>
+          <span className="text-[10px] text-text/50">{t("settings.journal.search.helpSource")}</span>
         </div>
       </div>
     </div>,

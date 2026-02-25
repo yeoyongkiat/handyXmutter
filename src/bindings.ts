@@ -772,9 +772,9 @@ async getJournalEntry(id: number) : Promise<Result<JournalEntry | null, string>>
     else return { status: "error", error: e  as any };
 }
 },
-async updateJournalEntry(id: number, title: string, tags: string[], linkedEntryIds: number[], folderId: number | null) : Promise<Result<null, string>> {
+async updateJournalEntry(id: number, title: string, tags: string[], linkedEntryIds: number[], folderId: number | null, userSource: string | null) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("update_journal_entry", { id, title, tags, linkedEntryIds, folderId }) };
+    return { status: "ok", data: await TAURI_INVOKE("update_journal_entry", { id, title, tags, linkedEntryIds, folderId, userSource }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -1060,6 +1060,94 @@ async saveVideoEntry(fileName: string, title: string, transcriptionText: string,
     else return { status: "error", error: e  as any };
 }
 },
+async checkDiarizeModelsInstalled() : Promise<Result<boolean, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("check_diarize_models_installed") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async installDiarizeModels() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("install_diarize_models") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getMeetingEntries() : Promise<Result<JournalEntry[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_meeting_entries") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getMeetingFolders() : Promise<Result<JournalFolder[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_meeting_folders") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async createMeetingFolder(name: string) : Promise<Result<JournalFolder, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("create_meeting_folder", { name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async saveMeetingEntry(fileName: string, title: string, transcriptionText: string, folderId: number | null) : Promise<Result<JournalEntry, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_meeting_entry", { fileName, title, transcriptionText, folderId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async transcribeMeeting(entryId: number, maxSpeakers: number | null, threshold: number | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("transcribe_meeting", { entryId, maxSpeakers, threshold }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getMeetingSegments(entryId: number) : Promise<Result<DiarizedSegment[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_meeting_segments", { entryId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async updateMeetingSpeakerName(entryId: number, speakerId: number, name: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_meeting_speaker_name", { entryId, speakerId, name }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async getMeetingSpeakerNames(entryId: number) : Promise<Result<Partial<{ [key in string]: string }>, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_meeting_speaker_names", { entryId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async diarizeEntry(entryId: number, maxSpeakers: number | null, threshold: number | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("diarize_entry", { entryId, maxSpeakers, threshold }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 /**
  * Checks if the Mac is a laptop by detecting battery presence
  * 
@@ -1098,6 +1186,10 @@ export type ChatMessage = { id: number; session_id: number; role: string; conten
 export type ChatSession = { id: number; entry_id: number; mode: string; title: string; created_at: number; updated_at: number }
 export type ClipboardHandling = "dont_modify" | "copy_to_clipboard"
 export type CustomSounds = { start: boolean; stop: boolean }
+/**
+ * A single diarized speech segment with speaker assignment and audio samples.
+ */
+export type DiarizedSegment = { speaker: number | null; start_ms: number; end_ms: number; text: string }
 export type EngineType = "Whisper" | "Parakeet" | "Moonshine" | "MoonshineStreaming" | "SenseVoice"
 export type HistoryEntry = { id: number; file_name: string; timestamp: number; saved: boolean; title: string; transcription_text: string; post_processed_text: string | null; post_process_prompt: string | null }
 /**
@@ -1108,7 +1200,7 @@ export type ImplementationChangeResult = { success: boolean;
  * List of binding IDs that were reset to defaults due to incompatibility
  */
 reset_bindings: string[] }
-export type JournalEntry = { id: number; file_name: string; timestamp: number; title: string; transcription_text: string; post_processed_text: string | null; post_process_prompt_id: string | null; tags: string[]; linked_entry_ids: number[]; folder_id: number | null; transcript_snapshots: string[]; source: string; source_url: string | null }
+export type JournalEntry = { id: number; file_name: string; timestamp: number; title: string; transcription_text: string; post_processed_text: string | null; post_process_prompt_id: string | null; tags: string[]; linked_entry_ids: number[]; folder_id: number | null; transcript_snapshots: string[]; source: string; source_url: string | null; speaker_names: string; user_source: string }
 export type JournalFolder = { id: number; name: string; created_at: number; source: string }
 export type JournalRecordingResult = { file_name: string; transcription_text: string }
 export type KeyboardImplementation = "tauri" | "handy_keys"

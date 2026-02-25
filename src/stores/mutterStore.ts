@@ -11,12 +11,19 @@ export interface MutterPromptOverrides {
   structure?: string;
   organise?: string;
   report?: string;
+  minutes?: string;
   retrieve?: string;
   sharpen?: string;
   brainstorm?: string;
+  synthesise?: string;
 }
 
+export type MutterTab = "journal" | "video" | "meeting";
+
 interface MutterStore {
+  /** Active tab — shared between sidebar and main panel */
+  activeTab: MutterTab;
+  setActiveTab: (tab: MutterTab) => void;
   selectedEntryId: number | null;
   setSelectedEntryId: (id: number | null) => void;
   selectedFolderId: number | null;
@@ -36,6 +43,11 @@ interface MutterStore {
   setSelectedVideoEntryId: (id: number | null) => void;
   selectedVideoFolderId: number | null;
   setSelectedVideoFolderId: (id: number | null) => void;
+  /** Meeting tab state */
+  selectedMeetingEntryId: number | null;
+  setSelectedMeetingEntryId: (id: number | null) => void;
+  selectedMeetingFolderId: number | null;
+  setSelectedMeetingFolderId: (id: number | null) => void;
   /** Entries currently being processed (importing, downloading, transcribing) */
   processingEntries: Record<number, ProcessingEntry>;
   setProcessingEntry: (id: number, status: string, progress: number) => void;
@@ -45,6 +57,8 @@ interface MutterStore {
 export const useMutterStore = create<MutterStore>()(
   persist(
     (set) => ({
+      activeTab: "journal" as MutterTab,
+      setActiveTab: (tab) => set({ activeTab: tab }),
       selectedEntryId: null,
       setSelectedEntryId: (id) => set({ selectedEntryId: id }),
       selectedFolderId: null,
@@ -73,6 +87,10 @@ export const useMutterStore = create<MutterStore>()(
       setSelectedVideoEntryId: (id) => set({ selectedVideoEntryId: id }),
       selectedVideoFolderId: null,
       setSelectedVideoFolderId: (id) => set({ selectedVideoFolderId: id }),
+      selectedMeetingEntryId: null,
+      setSelectedMeetingEntryId: (id) => set({ selectedMeetingEntryId: id }),
+      selectedMeetingFolderId: null,
+      setSelectedMeetingFolderId: (id) => set({ selectedMeetingFolderId: id }),
       processingEntries: {},
       setProcessingEntry: (id, status, progress) =>
         set((state) => ({
