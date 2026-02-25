@@ -1785,6 +1785,7 @@ const DetailView: React.FC<{
   const [contextInputValue, setContextInputValue] = useState("");
   const titleGeneratedForSession = useRef<Set<number>>(new Set());
   const chatMessagesEndRef = useRef<HTMLDivElement>(null);
+  const chatMessagesContainerRef = useRef<HTMLDivElement>(null);
   const transcriptionSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Rough token estimate: ~4 chars per token (common heuristic)
@@ -2179,9 +2180,12 @@ ${linkedEntryDetails}` : ""}`;
     }
   };
 
-  // Auto-scroll chat to bottom
+  // Auto-scroll chat to bottom (scroll only the chat container, not the page)
   useEffect(() => {
-    chatMessagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const container = chatMessagesContainerRef.current;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
   }, [chatMessages]);
 
   // Auto-start brainstorm mode: mutter sends opening questions without user prompt
@@ -2592,6 +2596,7 @@ ${linkedEntryDetails}` : ""}`;
                     ) : (
                       <span
                         className="text-xs text-text/70 truncate flex-1"
+                        onClick={(e) => e.stopPropagation()}
                         onDoubleClick={(e) => { e.stopPropagation(); setRenamingSessionId(session.id); setRenameValue(session.title); }}
                       >
                         {session.title || t("settings.journal.chatModeJotter")}
@@ -2720,6 +2725,7 @@ ${linkedEntryDetails}` : ""}`;
                     ) : (
                       <span
                         className="text-xs text-text/70 truncate flex-1"
+                        onClick={(e) => e.stopPropagation()}
                         onDoubleClick={(e) => { e.stopPropagation(); setRenamingSessionId(session.id); setRenameValue(session.title); }}
                       >
                         {session.title || t("settings.journal.chatAssistant")}
@@ -2778,7 +2784,7 @@ ${linkedEntryDetails}` : ""}`;
       {chatOpen && (
         <div
           className={`sticky bottom-4 bg-background border border-mid-gray/20 rounded-lg shadow-xl flex flex-col overflow-hidden transition-all max-w-2xl ml-auto ${
-            chatMaximised ? "h-[80vh]" : "h-80"
+            chatMaximised ? "h-[80vh]" : "h-[28rem]"
           }`}
         >
           {/* Chat header */}
@@ -2831,7 +2837,7 @@ ${linkedEntryDetails}` : ""}`;
           </div>
 
           {/* Chat messages area */}
-          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+          <div ref={chatMessagesContainerRef} className="flex-1 overflow-y-auto p-3 space-y-3">
             {!chatMode ? (
               <div className="flex flex-col items-center gap-3 py-2">
                 <MessageCircle className="w-6 h-6 text-mutter-primary/30 shrink-0" />
@@ -2905,7 +2911,7 @@ ${linkedEntryDetails}` : ""}`;
                     className={`max-w-[80%] px-3 py-2 rounded-lg text-sm ${
                       msg.role === "user"
                         ? "bg-mutter-primary text-white"
-                        : "bg-mid-gray/15 text-text/90"
+                        : "text-text/90 [&_p]:mb-3 [&_p:last-child]:mb-0"
                     }`}
                   >
                     <Markdown

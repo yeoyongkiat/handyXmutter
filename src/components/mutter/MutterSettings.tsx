@@ -34,24 +34,42 @@ const PromptEditor: React.FC<PromptEditorProps> = ({
 
   return (
     <div className="border border-mid-gray/20 rounded-lg overflow-hidden">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between px-3 py-2 hover:bg-mid-gray/5 transition-colors cursor-pointer"
-      >
-        <div className="flex items-center gap-2">
+      <div className="flex items-center justify-between px-3 py-2 hover:bg-mid-gray/5 transition-colors">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-2 flex-1 cursor-pointer"
+        >
           <span className="text-sm font-medium">{label}</span>
           {isCustomised && (
             <span className="px-1.5 py-0.5 bg-mutter-primary/15 text-mutter-primary text-[9px] rounded-full font-medium">
               {t("mutter.settings.customised")}
             </span>
           )}
+        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={(e) => { e.stopPropagation(); onReset(); }}
+            className={`p-1 rounded transition-colors cursor-pointer ${
+              isCustomised
+                ? "text-mutter-primary hover:bg-mutter-primary/10"
+                : "text-text/20 hover:text-text/40 hover:bg-mid-gray/10"
+            }`}
+            title={t("mutter.settings.resetToDefault")}
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="p-1 cursor-pointer"
+          >
+            <ChevronLeft
+              className={`w-3.5 h-3.5 text-text/40 transition-transform ${expanded ? "-rotate-90" : ""}`}
+            />
+          </button>
         </div>
-        <ChevronLeft
-          className={`w-3.5 h-3.5 text-text/40 transition-transform ${expanded ? "-rotate-90" : ""}`}
-        />
-      </button>
+      </div>
       {expanded && (
-        <div className="px-3 pb-3 space-y-2">
+        <div className="px-3 pb-3">
           <textarea
             value={value}
             onChange={(e) => onChange(e.target.value)}
@@ -59,15 +77,6 @@ const PromptEditor: React.FC<PromptEditorProps> = ({
             rows={8}
             className="w-full text-xs text-text/80 bg-background border border-mid-gray/20 rounded-md p-2 resize-y focus:outline-none focus:border-mutter-primary/50 font-mono leading-relaxed"
           />
-          {isCustomised && (
-            <button
-              onClick={onReset}
-              className="flex items-center gap-1 text-[10px] text-text/40 hover:text-mutter-primary transition-colors cursor-pointer"
-            >
-              <RotateCcw className="w-3 h-3" />
-              {t("mutter.settings.resetToDefault")}
-            </button>
-          )}
         </div>
       )}
     </div>

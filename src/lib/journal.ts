@@ -46,6 +46,22 @@ export interface ChatMessage {
 export const MUTTER_DEFAULT_PROMPTS = [
   {
     name: "Clean",
+    prompt: `Clean this transcript:
+1. Fix spelling, capitalization, and punctuation errors
+2. Convert number words to digits (twenty-five → 25, ten percent → 10%, five dollars → $5)
+3. Replace spoken punctuation with symbols (period → ., comma → ,, question mark → ?)
+4. Remove filler words (um, uh, like as filler)
+5. Remove consecutively repeated words in sentences, retaining only one instance of the word.
+
+Preserve exact meaning and word order. Do not paraphrase or reorder content.
+
+Return only the cleaned transcript.
+
+Transcript:
+\${output}`,
+  },
+  {
+    name: "Structure",
     prompt: `Format this transcript:
 1. Chunk the transcript into coherent paragraphs.
 2. Leave double new lines in between each paragraph.
@@ -58,11 +74,10 @@ Transcript:
 \${output}`,
   },
   {
-    name: "Structure",
+    name: "Organise",
     prompt: `Format this transcript:
-1. Break into clearly structured sections with descriptive headings (## Heading).
-2. Use bullet points for lists or key ideas.
-3. Leave double new lines between sections.
+1. Group paragraphs into coherent groups.
+2. For each coherent group, give a sub-header.
 
 Preserve exact meaning and word order. Do not paraphrase or reorder content.
 
@@ -72,33 +87,13 @@ Transcript:
 \${output}`,
   },
   {
-    name: "Organise",
-    prompt: `Format this transcript:
-1. Reorganise content into logical thematic sections with descriptive headings (## Heading).
-2. Use bullet points, numbered lists, or tables where appropriate.
-3. Add a brief summary at the top.
-4. Leave double new lines between sections.
-
-Preserve the speaker's meaning. Light paraphrasing is acceptable for clarity, but do not add new information.
-
-Return only the organised transcript.
-
-Transcript:
-\${output}`,
-  },
-  {
     name: "Report",
-    prompt: `Generate a concise report from this transcript:
-1. Start with a clear title.
-2. Include an Executive Summary (2-3 sentences).
-3. Organise key points under thematic headings (## Heading).
-4. Use bullet points for supporting details.
-5. End with Action Items or Next Steps if applicable.
-6. Use professional, clear language.
+    prompt: `Format this transcript into reported speech:
+1. Group paragraphs into coherent groups.
+2. Use bullets to elaborate sub-points.
+3. For each coherent group, give a sub-header.
 
-You may paraphrase for clarity and conciseness, but preserve all key information and decisions.
-
-Return only the report.
+Return only the reformatted transcript.
 
 Transcript:
 \${output}`,
