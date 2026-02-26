@@ -1,10 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { type } from "@tauri-apps/plugin-os";
-import {
-  checkAccessibilityPermission,
-  requestAccessibilityPermission,
-} from "tauri-plugin-macos-permissions-api";
+import { isMacOS as isMac } from "@/lib/platform";
 
 // Define permission state type
 type PermissionState = "request" | "verify" | "granted";
@@ -22,11 +18,12 @@ const AccessibilityPermissions: React.FC = () => {
     useState<PermissionState>("request");
 
   // Accessibility permissions are only required on macOS
-  const isMacOS = type() === "macos";
+  const isMacOS = isMac;
 
   // Check permissions without requesting
   const checkPermissions = async (): Promise<boolean> => {
-    const hasPermissions: boolean = await checkAccessibilityPermission();
+    const macPerms = await import("tauri-plugin-macos-permissions-api");
+    const hasPermissions: boolean = await macPerms.checkAccessibilityPermission();
     setHasAccessibility(hasPermissions);
     setPermissionState(hasPermissions ? "granted" : "verify");
     return hasPermissions;
@@ -36,7 +33,8 @@ const AccessibilityPermissions: React.FC = () => {
   const handleButtonClick = async (): Promise<void> => {
     if (permissionState === "request") {
       try {
-        await requestAccessibilityPermission();
+        const macPerms = await import("tauri-plugin-macos-permissions-api");
+        await macPerms.requestAccessibilityPermission();
         // After system prompt, transition to verification state
         setPermissionState("verify");
       } catch (error) {
@@ -54,7 +52,8 @@ const AccessibilityPermissions: React.FC = () => {
     if (!isMacOS) return;
 
     const initialSetup = async (): Promise<void> => {
-      const hasPermissions: boolean = await checkAccessibilityPermission();
+      const macPerms = await import("tauri-plugin-macos-permissions-api");
+      const hasPermissions: boolean = await macPerms.checkAccessibilityPermission();
       setHasAccessibility(hasPermissions);
       setPermissionState(hasPermissions ? "granted" : "request");
     };

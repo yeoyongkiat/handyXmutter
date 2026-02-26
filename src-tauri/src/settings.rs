@@ -1,4 +1,4 @@
-use log::{debug, warn};
+use log::{debug, error, warn};
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use specta::Type;
@@ -754,6 +754,24 @@ impl AppSettings {
     }
 }
 
+/// Serialize settings to JSON value, logging on failure.
+fn settings_to_json(settings: &AppSettings) -> Option<serde_json::Value> {
+    match serde_json::to_value(settings) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            error!("Failed to serialize settings: {}", e);
+            None
+        }
+    }
+}
+
+/// Write settings to store if serialization succeeds.
+fn store_settings(store: &tauri_plugin_store::Store<tauri::Wry>, settings: &AppSettings) {
+    if let Some(v) = settings_to_json(settings) {
+        store.set("settings", v);
+    }
+}
+
 pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
     // Initialize store
     let store = app
@@ -779,27 +797,26 @@ pub fn load_or_create_app_settings(app: &AppHandle) -> AppSettings {
 
                 if updated {
                     debug!("Settings updated with new bindings");
-                    store.set("settings", serde_json::to_value(&settings).unwrap());
+                    store_settings(&store, &settings);
                 }
 
                 settings
             }
             Err(e) => {
                 warn!("Failed to parse settings: {}", e);
-                // Fall back to default settings if parsing fails
                 let default_settings = get_default_settings();
-                store.set("settings", serde_json::to_value(&default_settings).unwrap());
+                store_settings(&store, &default_settings);
                 default_settings
             }
         }
     } else {
         let default_settings = get_default_settings();
-        store.set("settings", serde_json::to_value(&default_settings).unwrap());
+        store_settings(&store, &default_settings);
         default_settings
     };
 
     if ensure_post_process_defaults(&mut settings) {
-        store.set("settings", serde_json::to_value(&settings).unwrap());
+        store_settings(&store, &settings);
     }
 
     settings
@@ -813,17 +830,17 @@ pub fn get_settings(app: &AppHandle) -> AppSettings {
     let mut settings = if let Some(settings_value) = store.get("settings") {
         serde_json::from_value::<AppSettings>(settings_value).unwrap_or_else(|_| {
             let default_settings = get_default_settings();
-            store.set("settings", serde_json::to_value(&default_settings).unwrap());
+            store_settings(&store, &default_settings);
             default_settings
         })
     } else {
         let default_settings = get_default_settings();
-        store.set("settings", serde_json::to_value(&default_settings).unwrap());
+        store_settings(&store, &default_settings);
         default_settings
     };
 
     if ensure_post_process_defaults(&mut settings) {
-        store.set("settings", serde_json::to_value(&settings).unwrap());
+        store_settings(&store, &settings);
     }
 
     settings
@@ -834,7 +851,7 @@ pub fn write_settings(app: &AppHandle, settings: AppSettings) {
         .store(SETTINGS_STORE_PATH)
         .expect("Failed to initialize store");
 
-    store.set("settings", serde_json::to_value(&settings).unwrap());
+    store_settings(&store, &settings);
 }
 
 pub fn get_bindings(app: &AppHandle) -> HashMap<String, ShortcutBinding> {
@@ -846,9 +863,19 @@ pub fn get_bindings(app: &AppHandle) -> HashMap<String, ShortcutBinding> {
 pub fn get_stored_binding(app: &AppHandle, id: &str) -> ShortcutBinding {
     let bindings = get_bindings(app);
 
-    let binding = bindings.get(id).unwrap().clone();
-
-    binding
+    bindings
+        .get(id)
+        .cloned()
+        .unwrap_or_else(|| {
+            warn!("Binding '{}' not found, returning empty binding", id);
+            ShortcutBinding {
+                id: id.to_string(),
+                name: String::new(),
+                description: String::new(),
+                default_binding: String::new(),
+                current_binding: String::new(),
+            }
+        })
 }
 
 pub fn get_history_limit(app: &AppHandle) -> usize {

@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Rust crate**: `handyxmutter` / `handyxmutter_app_lib`
 - **Binary**: `handyxmutter`
 - **Remotes**: `origin` = `github.com/yeoyongkiat/handyXmutter`, `upstream` = `github.com/cjpais/Handy`
-- **Updater plugin**: Rust-side plugin removed (was causing SIGABRT crash). Frontend `UpdateChecker` component still exists in UI but is non-functional (`check()` calls fail silently). To re-enable, need to: add back `tauri-plugin-updater` to Cargo.toml + lib.rs, configure signing keys, set up update endpoint in tauri.conf.json, and publish signed artifacts to GitHub Releases.
+- **Updater plugin**: Rust-side plugin removed (was causing SIGABRT crash). Frontend `UpdateChecker` component also removed (was dead code). To re-enable updates: add back `tauri-plugin-updater` to Cargo.toml + lib.rs, create new UpdateChecker component, configure signing keys, set up update endpoint in tauri.conf.json, and publish signed artifacts to GitHub Releases.
 
 ## Development Commands
 
@@ -44,7 +44,7 @@ curl -o src-tauri/resources/models/silero_vad_v4.onnx https://blob.handy.compute
 
 ## Architecture Overview
 
-Handy is a cross-platform speech-to-text app built with Tauri 2.x (Rust backend + React/TypeScript frontend). Desktop (macOS/Windows/Linux) is fully functional. Android support is in progress (Phase 1 complete — compiles for `aarch64-linux-android`).
+Handy is a cross-platform speech-to-text app built with Tauri 2.x (Rust backend + React/TypeScript frontend). Desktop (macOS/Windows/Linux) is fully functional. Android support is in progress — Phases 1-3 complete (compiles, launches, mobile-responsive UI), Phase 4 partially done (model download works on Android, audio recording backend pending).
 
 ### Backend Structure (src-tauri/src/)
 
@@ -70,9 +70,11 @@ Handy is a cross-platform speech-to-text app built with Tauri 2.x (Rust backend 
 
 ### Frontend Structure (src/)
 
-- `App.tsx` - Main component with onboarding flow
+- `App.tsx` - Main component with onboarding flow (mobile skips accessibility step)
 - `components/settings/` - Settings UI (35+ files)
-- `components/settings/journal/JournalSettings.tsx` - Full journal UI (DetailView, FoldersView, etc.)
+- `components/settings/journal/JournalSettings.tsx` - Journal UI: FoldersView, FolderDetailView, NewEntryView, RecordingView, DraftView, ImportingView, SearchResultsView, YouTubeInputView, WelcomeView (~2,500 lines after C1 split)
+- `components/settings/journal/DetailView.tsx` - Extracted from JournalSettings: DetailView, DiarizedTranscriptView, DiarizedSegmentEditor, NomsEditor (~2,000 lines)
+- `components/settings/journal/journalUtils.ts` - Shared types (ViewMode, EntrySource) and utilities (searchEntries, parseDateRange, speaker colors, formatMs)
 - `components/mutter/MutterPanel.tsx` - Tab bar + content routing
 - `components/mutter/MutterSettings.tsx` - Prompt customization + storage location picker
 - `components/model-selector/` - Model management interface
@@ -81,8 +83,9 @@ Handy is a cross-platform speech-to-text app built with Tauri 2.x (Rust backend 
 - `stores/settingsStore.ts` - Zustand store for settings
 - `stores/mutterStore.ts` - Zustand store for journal cross-component state
 - `lib/journal.ts` - Types, default prompts, command wrappers
+- `lib/platform.ts` - Platform detection: `isMobile`, `isDesktop`, `isMacOS`, `isAndroid`, `isIOS` (uses `@tauri-apps/plugin-os`)
 - `bindings.ts` - Auto-generated Tauri type bindings (via tauri-specta)
-- `overlay/` - Recording overlay window code
+- `overlay/` - Recording overlay window code (desktop only)
 
 ### Key Patterns
 
@@ -314,9 +317,24 @@ Binary paths (needed when shell profile isn't loaded, e.g., in Claude Code):
 
 ## Android Port
 
-### Status: Phase 1 Complete (Compiles), Phase 2 Pending (Run on Device)
+### Status: Phases 1-3 Complete, Phase 4 In Progress
 
-The codebase compiles for `aarch64-linux-android` but the frontend is not yet mobile-responsive. Desktop-only features are gated at compile time — the Android build includes only cross-platform functionality (journal CRUD, folders, chat, history, LLM post-processing, settings).
+The app compiles for `aarch64-linux-android`, launches on the Android emulator, and displays a mobile-responsive UI. Model download works on Android. Desktop-only features (audio recording, transcription, diarization, global shortcuts, tray, overlay) are gated at compile time. The Android build currently supports: journal CRUD, folders, chat, history, LLM post-processing, settings, and model management.
+
+**What works on Android today:**
+- App launches and renders the model selection onboarding
+- Model download/delete/select (full ModelManager available)
+- Journal entry CRUD, folders, chat sessions, post-processing
+- History entries, settings read/write
+- Mobile-responsive sidebar (drawer pattern), touch events, viewport units
+
+**What does NOT work on Android yet:**
+- Audio recording (no Android audio backend — needs oboe-rs or Tauri mobile plugin)
+- Transcription (TranscriptionManager gated — depends on transcribe-rs/ort ONNX)
+- Video/YouTube download (yt-dlp subprocess execution not supported on Android)
+- Meeting/diarization (pyannote-rs gated)
+- Share intent handling (manifest filters declared but no Kotlin handler code)
+- Runtime permission request UI for RECORD_AUDIO (manifest declares permission, no runtime prompt)
 
 ### Platform Conditional Compilation
 
@@ -325,17 +343,55 @@ Desktop-only code is gated with `#[cfg(not(any(target_os = "android", target_os 
 **Gated Rust modules** (not compiled on Android):
 - `actions`, `audio_feedback`, `audio_toolkit`, `clipboard`, `diarize`, `input`, `overlay`, `shortcut`, `signal_handle`, `transcription_coordinator`, `tray`, `tray_i18n`, `utils`, `ytdlp`
 
-**Gated command modules**: `audio`, `meeting`, `models`, `transcription`, `video`
+**Gated command modules**: `audio`, `meeting`, `transcription`, `video`
+
+**Cross-platform command modules**: `journal`, `history`, `models` (models has platform-conditional variants for commands that depend on TranscriptionManager)
 
 **Gated commands in journal.rs**: `start_journal_recording`, `stop_journal_recording`, `get_partial_journal_transcription`, `retranscribe_journal_entry`, `import_audio_for_journal`
 
-**Gated managers**: `audio`, `model`, `transcription`
+**Platform-conditional model commands** (in `commands/models.rs`):
+- `delete_model`, `set_active_model` — desktop version uses TranscriptionManager to unload/load; mobile version just updates settings
+- `get_transcription_model_status`, `is_model_loading` — desktop version queries TranscriptionManager; mobile version returns from settings/false
+
+**Gated managers**: `audio`, `transcription`
+
+**Cross-platform managers**: `journal`, `history`, `model` (ModelManager works on Android — uses reqwest/tar/flate2)
 
 **Gated journal manager methods**: `save_meeting_segments()`, `get_meeting_segments()` (depend on `diarize::DiarizedSegment`)
 
 **Gated history manager**: `save_transcription()` method (depends on `audio_toolkit::save_wav_file`)
 
 **Gated plugins**: `single-instance`, `global-shortcut`, `autostart`, `macos-permissions`
+
+**Specta bindings export**: Gated with `#[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]` — writing `../src/bindings.ts` fails on Android's read-only APK filesystem.
+
+### Frontend Platform Detection
+
+`src/lib/platform.ts` provides platform flags used throughout the frontend:
+```typescript
+import { platform } from "@tauri-apps/plugin-os";
+export const isMobile = platform() === "android" || platform() === "ios";
+export const isDesktop = !isMobile;
+export const isMacOS = platform() === "macos";
+export const isAndroid = platform() === "android";
+```
+
+**Where platform detection is used:**
+- `App.tsx` — Mobile skips accessibility onboarding, skips audio device refresh, skips enigo/shortcuts init
+- `App.tsx` — macOS-specific permission checks use dynamic `import("tauri-plugin-macos-permissions-api")`
+- `Sidebar.tsx` — Mobile renders slide-out drawer instead of fixed sidebar
+- `JournalSettings.tsx` — Desktop-only `onDragDropEvent` guards, pointer events for cross-platform DnD
+- `AccessibilityOnboarding.tsx`, `AccessibilityPermissions.tsx` — Dynamic macOS permission imports
+
+### Mobile UI Adaptations (Phase 2 completed)
+
+- **Pointer Events**: All drag-and-drop uses Pointer Events API (`onPointerDown/pointermove/pointerup`) instead of mouse events — works on both touch and mouse
+- **Touch visibility**: `@media (hover: none)` CSS override in `App.css` forces `group-hover:opacity-100` elements to always be visible on touch devices
+- **Responsive sidebar**: Mobile uses a drawer pattern (slide-out with overlay backdrop); desktop keeps fixed 160px sidebar
+- **Viewport units**: `h-screen` replaced with `h-dvh` (dynamic viewport height) throughout
+- **Dynamic imports**: `tauri-plugin-macos-permissions-api` lazy-loaded only on macOS via `await import()`
+- **Desktop-only guards**: `onDragDropEvent` wrapped with `if (!isDesktop) return`; `initializeEnigo`/`initializeShortcuts` behind `if (isDesktop)`
+- **Clipboard error handling**: Try-catch with toast notification on failure
 
 ### Desktop-Only Dependencies (Cargo.toml)
 
@@ -350,7 +406,9 @@ These crates are under `[target.'cfg(not(any(target_os = "android", target_os = 
 - `handy-keys` — keyboard shortcut handling
 - `tauri-plugin-autostart`, `tauri-plugin-global-shortcut`, `tauri-plugin-single-instance`, `tauri-plugin-macos-permissions`
 
-Cross-platform deps use `reqwest` with `rustls-tls` (not OpenSSL) to avoid Android cross-compilation issues.
+Cross-platform deps: `reqwest` uses `rustls-tls` (not OpenSSL), `tar`/`flate2`/`futures-util` for model download.
+
+All git dependencies pinned to specific commit hashes (no `branch` — `branch` + `rev` is ambiguous in Cargo.toml).
 
 ### Entry Points (lib.rs)
 
@@ -365,53 +423,110 @@ pub fn run(cli_args: CliArgs) { run_inner(cli_args); }
 pub fn run() { run_inner(CliArgs::default()); }
 ```
 
-Mobile builds register a reduced set of Tauri commands (journal CRUD, folders, chat, history, settings) via a separate `specta_builder` block.
+**Mobile command set** (registered in `collect_commands!` for mobile): journal CRUD (28 commands minus 5 recording/transcription), folders, chat, history, settings, model management (11 commands). Desktop has the full set including audio, video, meeting, transcription, shortcuts.
+
+**Mobile init** (`initialize_core_logic_mobile`): Creates `HistoryManager`, `JournalManager`, and `ModelManager`. Desktop additionally creates `AudioRecordingManager`, `TranscriptionManager`, `TranscriptionCoordinator`.
+
+### Android Manifest & Permissions
+
+`src-tauri/gen/android/app/src/main/AndroidManifest.xml` declares:
+- `INTERNET`, `ACCESS_NETWORK_STATE` — network access for model download + LLM API
+- `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS` — for future audio recording
+- `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MICROPHONE` — for future background recording
+- `POST_NOTIFICATIONS` — for recording indicator notification
+
+Share intent filters declared for `text/plain`, `audio/*`, `video/*` — but no Kotlin handler code yet.
+
+`RustWebChromeClient.kt` (Tauri-generated) auto-handles WebView-level `AUDIO_CAPTURE` permission requests.
 
 ### Capabilities (src-tauri/capabilities/)
 
 - `default.json` — Cross-platform permissions (fs, store, dialog, opener, clipboard, log, os, process, shell)
 - `desktop.json` — Desktop-only: `global-shortcut:*`, `macos-permissions:default`, `recording_overlay` window. Platforms: `["macOS", "windows", "linux"]`
-- `mobile.json` — Mobile-only: `clipboard-manager:default`. Platforms: `["android", "iOS"]`
+- `mobile.json` — Mobile: `clipboard-manager:default`, `dialog:default`, `fs:default`, `opener:default`, `os:default`, `process:default`, `store:default`. Platforms: `["android", "iOS"]`
 
 ### Android Development Setup
 
-**Prerequisites**: JDK 21+, Android SDK, Android NDK 27+
+**Prerequisites**: JDK 21+, Android SDK, Android NDK 27.0.12077973
+
+**Emulator**: Pixel_9_API_35 AVD exists at `~/.android/avd/`. Launch via Android Studio or `emulator -avd Pixel_9_API_35`.
 
 ```bash
-# Environment variables
+# Environment variables (absolute paths required — $HOME expansion fails in sandbox)
 export JAVA_HOME="/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home"
-export ANDROID_HOME="$HOME/Library/Android/sdk"
+export ANDROID_HOME="/Users/yeoyongkiat/Library/Android/sdk"
 export NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
 export CC_aarch64_linux_android="$NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android24-clang"
 export AR_aarch64_linux_android="$NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar"
 
-# Check compilation
+# Check compilation only (fast)
 cargo check --target aarch64-linux-android --lib
 
-# Android dev (once frontend is ready)
-npx tauri android dev
+# Build + deploy to connected emulator/device
+CMAKE_POLICY_VERSION_MINIMUM=3.5 bun run tauri android dev
+
+# View app logs
+adb logcat | grep -i "handyxmutter\|RustStdoutStderr\|panic"
+
+# Take screenshot
+adb shell screencap -p /sdcard/screenshot.png && adb pull /sdcard/screenshot.png /tmp/screenshot.png
 ```
 
-NDK linker paths are configured in `.cargo/config.toml` for all 4 Android targets (aarch64, armv7, i686, x86_64).
+NDK linker paths configured in `.cargo/config.toml` for all 4 Android targets (aarch64, armv7, i686, x86_64).
+
+**Build check workflow**: Always verify all three targets compile after changes:
+1. `cargo check --target aarch64-linux-android --lib` (Android)
+2. `cargo check --lib` (desktop)
+3. `bun run tsc --noEmit` (TypeScript)
 
 ### build.rs Notes
 
 `build.rs` runs on the **host** machine, not the target. Use `CARGO_CFG_TARGET_OS` / `CARGO_CFG_TARGET_ARCH` env vars (not `#[cfg]` attributes) to check the compilation target. The Apple Intelligence bridge build is gated this way.
 
-### Known Frontend Issues for Android (Phase 2 TODO)
+### Phase 4 Remaining Work (Android-Specific Features)
 
-- No touch events — drag-and-drop uses `mousedown/mousemove/mouseup` only
-- Hover-dependent UI controls invisible on touch (`opacity-0 group-hover:opacity-100`)
-- Fixed 160px sidebar doesn't fit mobile viewports
-- `100vh` includes mobile address bar, causing overflow
-- Touch targets too small (14x14px vs 44x44px minimum)
-- `tauri-plugin-macos-permissions` imported unconditionally in `App.tsx`
-- Desktop-only `onDragDropEvent` used without platform guard
-- No Android audio recording backend yet (needs oboe-rs or Tauri mobile plugin)
+**Foreground service for audio recording** (CRITICAL for recording to work):
+1. Create `AudioRecordingService.kt` in `src-tauri/gen/android/app/src/main/java/com/handyxmutter/journal/`
+2. Declare `<service android:name=".AudioRecordingService" android:foregroundServiceType="microphone" />` in AndroidManifest.xml
+3. Create notification channel for recording indicator
+4. Implement Rust↔Android bridge via Tauri mobile plugin or JNI
+
+**Android audio recording backend**:
+- Desktop uses `cpal` (CoreAudio/WASAPI/ALSA) — zero Android support
+- Options: `oboe-rs` (Android high-perf audio) behind `#[cfg(target_os = "android")]`, or Tauri mobile plugin bridge to Android MediaRecorder API
+- Implement `AudioBackend` trait with desktop (cpal) and Android (oboe/MediaRecorder) implementations
+- Wire up to existing `AudioRecordingManager` pattern
+
+**ONNX transcription on Android**:
+- `ort 2.0.0-rc.10` has theoretical Android support (NNAPI backend)
+- Test with tiny Whisper model (~40MB) on emulator
+- Pre-bundle tiny model in APK or download on first launch
+- Models are 100MB-1.5GB — need download-on-demand with progress
+
+**Share intent handler**:
+- `AndroidManifest.xml` already has intent filters for text/audio/video
+- Need Kotlin code in `MainActivity.kt` to handle `ACTION_SEND` intents
+- Bridge received data to frontend via Tauri event (`share-received`)
+
+**Runtime permission request UI**:
+- `RECORD_AUDIO` declared in manifest but no runtime prompt
+- Android 6.0+ requires runtime permission request before first use
+- Add permission check/request flow in frontend before recording starts
 
 ### Android Port Plan Reference
 
 Full audit and phased plan at: `.claude/plans/lucky-juggling-cookie.md`
+
+### Android Gotchas
+
+- **Specta bindings crash**: `specta_builder.export()` writes to `../src/bindings.ts` — fails on Android's read-only APK filesystem with `ReadOnlyFilesystem` error. Must gate with `#[cfg(not(android/ios))]`.
+- **Port conflicts**: `tauri android dev` starts a Vite dev server on port 1420. Kill stale processes with `lsof -ti:1420 | xargs kill -9` before retrying.
+- **`$HOME` expansion**: In Claude Code sandbox, `$HOME` may not expand properly. Use absolute paths for NDK env vars.
+- **`branch` + `rev` in Cargo.toml**: Cannot have both — Cargo treats it as ambiguous. Use only `rev` for pinned git deps.
+- **`build.rs` target detection**: Uses `CARGO_CFG_TARGET_OS` env var, NOT `#[cfg]` attributes (build.rs runs on host).
+- **`#[tauri::mobile_entry_point]`**: Requires a 0-argument function — split desktop/mobile entry points.
+- **OpenSSL cross-compile**: Won't work for Android — use `rustls-tls` feature for reqwest.
+- **Emulator window focus**: After `tauri android dev`, the emulator window may be behind other windows. Use `adb shell dumpsys activity top` to verify app is running, `adb shell screencap` to take screenshots.
 
 ## Git Workflow
 

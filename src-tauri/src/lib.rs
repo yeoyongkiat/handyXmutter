@@ -45,7 +45,6 @@ use env_filter::Builder as EnvFilterBuilder;
 use managers::audio::AudioRecordingManager;
 use managers::history::HistoryManager;
 use managers::journal::JournalManager;
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use managers::model::ModelManager;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use managers::transcription::TranscriptionManager;
@@ -276,9 +275,12 @@ fn initialize_core_logic_mobile(app_handle: &AppHandle) {
         Arc::new(HistoryManager::new(app_handle).expect("Failed to initialize history manager"));
     let journal_manager =
         Arc::new(JournalManager::new(app_handle).expect("Failed to initialize journal manager"));
+    let model_manager =
+        Arc::new(ModelManager::new(app_handle).expect("Failed to initialize model manager"));
 
     app_handle.manage(history_manager);
     app_handle.manage(journal_manager);
+    app_handle.manage(model_manager);
 }
 
 #[tauri::command]
@@ -503,10 +505,21 @@ fn run_inner(cli_args: CliArgs) {
         commands::history::delete_history_entry,
         commands::history::update_history_limit,
         commands::history::update_recording_retention_period,
+        commands::models::get_available_models,
+        commands::models::get_model_info,
+        commands::models::download_model,
+        commands::models::delete_model,
+        commands::models::cancel_download,
+        commands::models::set_active_model,
+        commands::models::get_current_model,
+        commands::models::get_transcription_model_status,
+        commands::models::is_model_loading,
+        commands::models::has_any_models_available,
+        commands::models::has_any_models_or_downloads,
         helpers::clamshell::is_laptop,
     ]);
 
-    #[cfg(debug_assertions)] // <- Only export on non-release builds
+    #[cfg(all(debug_assertions, not(any(target_os = "android", target_os = "ios"))))]
     specta_builder
         .export(
             Typescript::default().bigint(BigIntExportBehavior::Number),

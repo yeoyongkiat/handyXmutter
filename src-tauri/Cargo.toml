@@ -75,13 +75,13 @@ tauri-plugin-autostart = "2.5.1"
 tauri-plugin-global-shortcut = "2.3.1"
 tauri-plugin-single-instance = "2.3.2"
 tauri-plugin-macos-permissions = "2.3.0"
-rdev = { git = "https://github.com/rustdesk-org/rdev" }
+rdev = { git = "https://github.com/rustdesk-org/rdev", rev = "a90dbe11" }
 cpal = "0.16.0"
 rubato = "0.16.2"
 rustfft = "6.4.0"
-vad-rs = { git = "https://github.com/cjpais/vad-rs", default-features = false }
+vad-rs = { git = "https://github.com/cjpais/vad-rs", rev = "88b3a01f", default-features = false }
 enigo = "0.6.1"
-rodio = { git = "https://github.com/cjpais/rodio.git" }
+rodio = { git = "https://github.com/cjpais/rodio.git", rev = "fed30292" }
 symphonia = { version = "0.5", features = ["isomp4", "mkv", "aac", "mp3", "vorbis", "pcm"] }
 transcribe-rs = { version = "0.2.5", features = ["whisper", "parakeet", "moonshine", "sense_voice"] }
 pyannote-rs = "0.3.4"
@@ -97,16 +97,16 @@ windows = { version = "0.61.3", features = [
 ] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2.1" }
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", rev = "da9c9a8d" }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 gtk-layer-shell = { version = "0.8", features = ["v0_6"] }
 gtk = "0.18"
 
 [patch.crates-io]
-tauri-runtime = { git = "https://github.com/cjpais/tauri.git", branch = "handy-2.9.1" }
-tauri-runtime-wry = { git = "https://github.com/cjpais/tauri.git", branch = "handy-2.9.1" }
-tauri-utils = { git = "https://github.com/cjpais/tauri.git", branch = "handy-2.9.1" }
+tauri-runtime = { git = "https://github.com/cjpais/tauri.git", rev = "8ba98c7b" }
+tauri-runtime-wry = { git = "https://github.com/cjpais/tauri.git", rev = "8ba98c7b" }
+tauri-utils = { git = "https://github.com/cjpais/tauri.git", rev = "8ba98c7b" }
 
 [dev-dependencies]
 tempfile = "3"

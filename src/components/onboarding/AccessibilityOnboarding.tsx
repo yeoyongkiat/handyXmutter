@@ -1,17 +1,20 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { platform } from "@tauri-apps/plugin-os";
-import {
-  checkAccessibilityPermission,
-  requestAccessibilityPermission,
-  checkMicrophonePermission,
-  requestMicrophonePermission,
-} from "tauri-plugin-macos-permissions-api";
 import { toast } from "sonner";
 import { commands } from "@/bindings";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { isMacOS, isDesktop } from "@/lib/platform";
 import HandyTextLogo from "../icons/HandyTextLogo";
 import { Keyboard, Mic, Check, Loader2 } from "lucide-react";
+
+// Lazy-loaded macOS permissions module
+let macPerms: typeof import("tauri-plugin-macos-permissions-api") | null = null;
+const getMacPerms = async () => {
+  if (!macPerms) {
+    macPerms = await import("tauri-plugin-macos-permissions-api");
+  }
+  return macPerms;
+};
 
 interface AccessibilityOnboardingProps {
   onComplete: () => void;
@@ -50,12 +53,10 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
 
   // Check platform and permission status on mount
   useEffect(() => {
-    const currentPlatform = platform();
-    const isMac = currentPlatform === "macos";
-    setIsMacOS(isMac);
+    setIsMacOS(isMacOS);
 
     // Skip immediately on non-macOS - no permissions needed
-    if (!isMac) {
+    if (!isMacOS) {
       onComplete();
       return;
     }
@@ -63,13 +64,14 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
     // On macOS, check both permissions
     const checkInitial = async () => {
       try {
+        const perms = await getMacPerms();
         const [accessibilityGranted, microphoneGranted] = await Promise.all([
-          checkAccessibilityPermission(),
-          checkMicrophonePermission(),
+          perms.checkAccessibilityPermission(),
+          perms.checkMicrophonePermission(),
         ]);
 
         // If accessibility is granted, initialize Enigo and shortcuts
-        if (accessibilityGranted) {
+        if (accessibilityGranted && isDesktop) {
           try {
             await Promise.all([
               commands.initializeEnigo(),
@@ -111,9 +113,10 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
 
     pollingRef.current = setInterval(async () => {
       try {
+        const perms = await getMacPerms();
         const [accessibilityGranted, microphoneGranted] = await Promise.all([
-          checkAccessibilityPermission(),
-          checkMicrophonePermission(),
+          perms.checkAccessibilityPermission(),
+          perms.checkMicrophonePermission(),
         ]);
 
         setPermissions((prev) => {
@@ -121,8 +124,8 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
 
           if (accessibilityGranted && prev.accessibility !== "granted") {
             newState.accessibility = "granted";
-            // Initialize Enigo and shortcuts when accessibility is granted
-            Promise.all([
+            // Initialize Enigo and shortcuts when accessibility is granted (desktop only)
+            if (isDesktop) Promise.all([
               commands.initializeEnigo(),
               commands.initializeShortcuts(),
             ]).catch((e) => {
@@ -180,7 +183,8 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
 
   const handleGrantAccessibility = async () => {
     try {
-      await requestAccessibilityPermission();
+      const perms = await getMacPerms();
+      await perms.requestAccessibilityPermission();
       setPermissions((prev) => ({ ...prev, accessibility: "waiting" }));
       startPolling();
     } catch (error) {
@@ -191,7 +195,8 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
 
   const handleGrantMicrophone = async () => {
     try {
-      await requestMicrophonePermission();
+      const perms = await getMacPerms();
+      await perms.requestMicrophonePermission();
       setPermissions((prev) => ({ ...prev, microphone: "waiting" }));
       startPolling();
     } catch (error) {
@@ -207,7 +212,7 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
       permissions.microphone === "checking")
   ) {
     return (
-      <div className="h-screen w-screen flex items-center justify-center">
+      <div className="h-dvh w-screen flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-text/50" />
       </div>
     );
@@ -216,7 +221,7 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
   // All permissions granted - show success briefly
   if (allGranted) {
     return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center gap-4">
+      <div className="h-dvh w-screen flex flex-col items-center justify-center gap-4">
         <div className="p-4 rounded-full bg-emerald-500/20">
           <Check className="w-12 h-12 text-emerald-400" />
         </div>
@@ -229,7 +234,7 @@ const AccessibilityOnboarding: React.FC<AccessibilityOnboardingProps> = ({
 
   // Show permissions request screen
   return (
-    <div className="h-screen w-screen flex flex-col p-6 gap-6 items-center justify-center">
+    <div className="h-dvh w-screen flex flex-col p-6 gap-6 items-center justify-center">
       <div className="flex flex-col items-center gap-2">
         <HandyTextLogo width={200} />
       </div>

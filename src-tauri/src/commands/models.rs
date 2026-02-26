@@ -1,4 +1,5 @@
 use crate::managers::model::{ModelInfo, ModelManager};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::managers::transcription::TranscriptionManager;
 use crate::settings::{get_settings, write_settings};
 use std::sync::Arc;
@@ -33,6 +34,7 @@ pub async fn download_model(
         .map_err(|e| e.to_string())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 #[specta::specta]
 pub async fn delete_model(
@@ -58,6 +60,28 @@ pub async fn delete_model(
         .map_err(|e| e.to_string())
 }
 
+/// Mobile version of delete_model — no TranscriptionManager dependency
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+#[specta::specta]
+pub async fn delete_model(
+    app_handle: AppHandle,
+    model_manager: State<'_, Arc<ModelManager>>,
+    model_id: String,
+) -> Result<(), String> {
+    let settings = get_settings(&app_handle);
+    if settings.selected_model == model_id {
+        let mut settings = get_settings(&app_handle);
+        settings.selected_model = String::new();
+        write_settings(&app_handle, settings);
+    }
+
+    model_manager
+        .delete_model(&model_id)
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 #[specta::specta]
 pub async fn set_active_model(
@@ -88,6 +112,30 @@ pub async fn set_active_model(
     Ok(())
 }
 
+/// Mobile version — saves setting only, no model loading (transcription not yet supported)
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+#[specta::specta]
+pub async fn set_active_model(
+    app_handle: AppHandle,
+    model_manager: State<'_, Arc<ModelManager>>,
+    model_id: String,
+) -> Result<(), String> {
+    let model_info = model_manager
+        .get_model_info(&model_id)
+        .ok_or_else(|| format!("Model not found: {}", model_id))?;
+
+    if !model_info.is_downloaded {
+        return Err(format!("Model not downloaded: {}", model_id));
+    }
+
+    let mut settings = get_settings(&app_handle);
+    settings.selected_model = model_id.clone();
+    write_settings(&app_handle, settings);
+
+    Ok(())
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn get_current_model(app_handle: AppHandle) -> Result<String, String> {
@@ -95,6 +143,7 @@ pub async fn get_current_model(app_handle: AppHandle) -> Result<String, String> 
     Ok(settings.selected_model)
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 #[specta::specta]
 pub async fn get_transcription_model_status(
@@ -103,14 +152,35 @@ pub async fn get_transcription_model_status(
     Ok(transcription_manager.get_current_model())
 }
 
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+#[specta::specta]
+pub async fn get_transcription_model_status(
+    app_handle: AppHandle,
+) -> Result<Option<String>, String> {
+    let settings = get_settings(&app_handle);
+    if settings.selected_model.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(settings.selected_model))
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 #[specta::specta]
 pub async fn is_model_loading(
     transcription_manager: State<'_, Arc<TranscriptionManager>>,
 ) -> Result<bool, String> {
-    // Check if transcription manager has a loaded model
     let current_model = transcription_manager.get_current_model();
     Ok(current_model.is_none())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+#[specta::specta]
+pub async fn is_model_loading() -> Result<bool, String> {
+    Ok(false)
 }
 
 #[tauri::command]

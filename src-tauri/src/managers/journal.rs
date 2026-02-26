@@ -415,7 +415,7 @@ impl JournalManager {
         let new_wav_path = unique_path(&dir, &new_base, ".wav");
         let new_wav_name = new_wav_path
             .file_name()
-            .unwrap()
+            .ok_or_else(|| anyhow::anyhow!("Path has no filename: {:?}", new_wav_path))?
             .to_string_lossy()
             .to_string();
         let old_wav_path = dir.join(&entry.file_name);
@@ -678,7 +678,7 @@ impl JournalManager {
             let new_wav_path = unique_path(&dest_dir, &sanitized, ".wav");
             let name = new_wav_path
                 .file_name()
-                .unwrap()
+                .ok_or_else(|| anyhow::anyhow!("Path has no filename: {:?}", new_wav_path))?
                 .to_string_lossy()
                 .to_string();
             fs::rename(&src_path, &new_wav_path)?;

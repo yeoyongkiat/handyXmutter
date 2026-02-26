@@ -328,3 +328,12 @@
 .jotter-suggestion-empty:hover {
   background: transparent;
 }
+
+/* Mobile / touch device overrides */
+@media (hover: none) {
+  /* B2: Show hover-hidden controls on touch devices */
+  .group:hover .group-hover\:opacity-100,
+  .group .group-hover\:opacity-100 {
+    opacity: 1 !important;
+  }
+}

@@ -416,6 +416,7 @@
       "backToFolders": "Back to folders",
       "deleteConfirm": "Are you sure you want to delete this journal entry?",
       "copy": "Copy to clipboard",
+      "copyFailed": "Failed to copy to clipboard",
       "chatAssistant": "mutter",
       "chatNewSession": "New session",
       "chatPickMode": "Choose a mode to start",

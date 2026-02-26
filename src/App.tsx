@@ -1,11 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { Toaster } from "sonner";
 import { useTranslation } from "react-i18next";
-import { platform } from "@tauri-apps/plugin-os";
-import {
-  checkAccessibilityPermission,
-  checkMicrophonePermission,
-} from "tauri-plugin-macos-permissions-api";
 import "./App.css";
 import AccessibilityPermissions from "./components/AccessibilityPermissions";
 import Footer from "./components/footer";
@@ -16,6 +11,7 @@ import { useSettings } from "./hooks/useSettings";
 import { useSettingsStore } from "./stores/settingsStore";
 import { commands } from "@/bindings";
 import { getLanguageDirection, initializeRTL } from "@/lib/utils/rtl";
+import { isMacOS, isDesktop, isMobile } from "@/lib/platform";
 
 type OnboardingStep = "accessibility" | "model" | "done";
 
@@ -59,14 +55,16 @@ function App() {
   useEffect(() => {
     if (onboardingStep === "done" && !hasCompletedPostOnboardingInit.current) {
       hasCompletedPostOnboardingInit.current = true;
-      Promise.all([
-        commands.initializeEnigo(),
-        commands.initializeShortcuts(),
-      ]).catch((e) => {
-        console.warn("Failed to initialize:", e);
-      });
-      refreshAudioDevices();
-      refreshOutputDevices();
+      if (isDesktop) {
+        Promise.all([
+          commands.initializeEnigo(),
+          commands.initializeShortcuts(),
+        ]).catch((e) => {
+          console.warn("Failed to initialize:", e);
+        });
+        refreshAudioDevices();
+        refreshOutputDevices();
+      }
     }
   }, [onboardingStep, refreshAudioDevices, refreshOutputDevices]);
 
@@ -104,11 +102,12 @@ function App() {
       if (hasModels) {
         // Returning user - but check if they need to grant permissions on macOS
         setIsReturningUser(true);
-        if (platform() === "macos") {
+        if (isMacOS) {
           try {
+            const macPerms = await import("tauri-plugin-macos-permissions-api");
             const [hasAccessibility, hasMicrophone] = await Promise.all([
-              checkAccessibilityPermission(),
-              checkMicrophonePermission(),
+              macPerms.checkAccessibilityPermission(),
+              macPerms.checkMicrophonePermission(),
             ]);
             if (!hasAccessibility || !hasMicrophone) {
               // Missing permissions - show accessibility onboarding
@@ -122,13 +121,24 @@ function App() {
         }
         setOnboardingStep("done");
       } else {
-        // New user - start full onboarding
+        // New user
         setIsReturningUser(false);
-        setOnboardingStep("accessibility");
+        if (isMobile) {
+          // On mobile, skip accessibility onboarding (no accessibility/enigo needed)
+          // Go straight to model selection
+          setOnboardingStep("model");
+        } else {
+          // Desktop: start full onboarding with accessibility step
+          setOnboardingStep("accessibility");
+        }
       }
     } catch (error) {
       console.error("Failed to check onboarding status:", error);
-      setOnboardingStep("accessibility");
+      if (isMobile) {
+        setOnboardingStep("model");
+      } else {
+        setOnboardingStep("accessibility");
+      }
     }
   };
 
@@ -159,7 +169,7 @@ function App() {
   return (
     <div
       dir={direction}
-      className="h-screen flex flex-col select-none cursor-default"
+      className="h-dvh flex flex-col select-none cursor-default"
     >
       <Toaster
         theme="system"

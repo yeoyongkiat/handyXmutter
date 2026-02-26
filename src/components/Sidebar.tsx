@@ -14,8 +14,10 @@ import {
   FolderClosed,
   Search,
   CircleHelp,
+  Menu,
   X,
 } from "lucide-react";
+import { isMobile } from "@/lib/platform";
 import HandyTextLogo from "./icons/HandyTextLogo";
 import HandyHand from "./icons/HandyHand";
 import { useSettings } from "../hooks/useSettings";
@@ -107,6 +109,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const { t } = useTranslation();
   const { settings } = useSettings();
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   const isMutterMode = activeSection === "mutter";
 
@@ -114,8 +117,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     .filter(([_, config]) => config.enabled(settings))
     .map(([id, config]) => ({ id: id as SidebarSection, ...config }));
 
-  return (
-    <div className="flex flex-col w-40 h-full border-e border-mid-gray/20 items-center px-2 relative overflow-hidden">
+  const handleSectionChange = (section: SidebarSection) => {
+    onSectionChange(section);
+    if (isMobile) setDrawerOpen(false);
+  };
+
+  const sidebarContent = (
+    <>
       {/* === Handy sidebar === */}
       <div
         className={`flex flex-col w-full h-full items-center absolute inset-0 px-2 transition-all duration-300 ease-in-out ${
@@ -139,7 +147,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     ? "bg-logo-primary/80"
                     : "hover:bg-mid-gray/20 hover:opacity-100 opacity-85"
                 }`}
-                onClick={() => onSectionChange(section.id)}
+                onClick={() => handleSectionChange(section.id)}
               >
                 <Icon width={24} height={24} className="shrink-0" />
                 <p
@@ -157,7 +165,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="w-full pt-2 mt-2 border-t border-mid-gray/20 pb-2 shrink-0">
           <div
             className="flex items-center justify-center p-2 w-full rounded-lg cursor-pointer transition-colors hover:bg-mid-gray/20 opacity-70 hover:opacity-100"
-            onClick={() => onSectionChange("mutter")}
+            onClick={() => handleSectionChange("mutter")}
           >
             <img
               src={mutterLogo}
@@ -194,12 +202,56 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="w-full pt-2 mt-2 border-t border-mid-gray/20 pb-2 shrink-0">
           <div
             className="flex items-center justify-center p-2 w-full rounded-lg cursor-pointer transition-colors hover:bg-mid-gray/20 opacity-70 hover:opacity-100"
-            onClick={() => onSectionChange("general")}
+            onClick={() => handleSectionChange("general")}
           >
             <HandyTextLogo width={80} />
           </div>
         </div>
       </div>
+    </>
+  );
+
+  // Mobile: slide-out drawer
+  if (isMobile) {
+    return (
+      <>
+        {/* Hamburger button */}
+        <button
+          onClick={() => setDrawerOpen(true)}
+          className="fixed top-3 left-3 z-50 p-2 rounded-lg bg-background border border-mid-gray/20 shadow-sm"
+        >
+          <Menu className="w-5 h-5" />
+        </button>
+
+        {/* Drawer overlay */}
+        {drawerOpen && (
+          <div
+            className="fixed inset-0 z-50 bg-black/40"
+            onClick={() => setDrawerOpen(false)}
+          >
+            <div
+              className="flex flex-col w-56 h-full bg-background border-e border-mid-gray/20 items-center px-2 relative overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Close button */}
+              <button
+                onClick={() => setDrawerOpen(false)}
+                className="absolute top-3 right-3 z-10 p-1.5 rounded-lg hover:bg-mid-gray/20"
+              >
+                <X className="w-4 h-4" />
+              </button>
+              {sidebarContent}
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  // Desktop: fixed sidebar
+  return (
+    <div className="flex flex-col w-40 h-full border-e border-mid-gray/20 items-center px-2 relative overflow-hidden">
+      {sidebarContent}
     </div>
   );
 };
@@ -257,11 +309,11 @@ const MutterFileExplorer: React.FC = () => {
     }
   }, [isDragging]);
 
-  // Global mousemove/mouseup listeners for drag
+  // Global pointermove/pointerup listeners for drag (supports both mouse and touch)
   useEffect(() => {
     if (!mouseDownRef.current && !isDragging) return;
 
-    const handleMouseMove = (e: MouseEvent) => {
+    const handlePointerMove = (e: PointerEvent) => {
       if (mouseDownRef.current && !isDragging) {
         const dx = e.clientX - mouseDownRef.current.x;
         const dy = e.clientY - mouseDownRef.current.y;
@@ -272,7 +324,7 @@ const MutterFileExplorer: React.FC = () => {
       }
     };
 
-    const handleMouseUp = () => {
+    const handlePointerUp = () => {
       if (isDragging && dragEntryId != null && dropTargetFolderId != null) {
         const targetFolder = folders.find((f) => f.id === dropTargetFolderId);
         const draggedEntry = entries.find((e) => e.id === dragEntryId);
@@ -288,15 +340,15 @@ const MutterFileExplorer: React.FC = () => {
       mouseDownRef.current = null;
     };
 
-    document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
+    document.addEventListener("pointermove", handlePointerMove);
+    document.addEventListener("pointerup", handlePointerUp);
     return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
+      document.removeEventListener("pointermove", handlePointerMove);
+      document.removeEventListener("pointerup", handlePointerUp);
     };
   }, [isDragging, dragEntryId, dropTargetFolderId]);
 
-  const handleEntryMouseDown = useCallback((entryId: number, e: React.MouseEvent) => {
+  const handleEntryPointerDown = useCallback((entryId: number, e: React.PointerEvent) => {
     if (e.button !== 0) return;
     mouseDownRef.current = { entryId, x: e.clientX, y: e.clientY };
   }, []);
@@ -328,7 +380,7 @@ const MutterFileExplorer: React.FC = () => {
   // Outside-click to close search help (check both anchor and portaled popup)
   useEffect(() => {
     if (!showSearchHelp) return;
-    const handler = (e: MouseEvent) => {
+    const handler = (e: PointerEvent) => {
       const target = e.target as Node;
       // Don't close if clicking inside the search bar area
       if (searchHelpRef.current?.contains(target)) return;
@@ -337,8 +389,8 @@ const MutterFileExplorer: React.FC = () => {
       if (popup?.contains(target)) return;
       setShowSearchHelp(false);
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    document.addEventListener("pointerdown", handler);
+    return () => document.removeEventListener("pointerdown", handler);
   }, [showSearchHelp]);
 
   const handleFolderClick = (folderId: number) => {
@@ -408,15 +460,15 @@ const MutterFileExplorer: React.FC = () => {
               onClick={() => {
                 if (!isDragging) handleFolderClick(folder.id);
               }}
-              onMouseEnter={() => {
+              onPointerEnter={() => {
                 if (isDragging) setDropTargetFolderId(folder.id);
                 if (panelDragEntryId != null) setPanelDropTargetFolderId(folder.id);
               }}
-              onMouseLeave={() => {
+              onPointerLeave={() => {
                 if (isDragging && dropTargetFolderId === folder.id) setDropTargetFolderId(null);
                 if (panelDragEntryId != null && panelDropTargetFolderId === folder.id) setPanelDropTargetFolderId(null);
               }}
-              onMouseUp={() => {
+              onPointerUp={() => {
                 if (panelDragEntryId != null && panelDropTargetFolderId === folder.id) {
                   const draggedEntry = entries.find((e) => e.id === panelDragEntryId);
                   journalCommands.moveEntryToFolder(panelDragEntryId, folder.id).then(() => {
@@ -451,7 +503,7 @@ const MutterFileExplorer: React.FC = () => {
                       isDragged={dragEntryId === entry.id}
                       isDragMode={isDragging}
                       onClick={() => { if (!isDragging) setSelectedEntryId(entry.id); }}
-                      onMouseDown={(e) => handleEntryMouseDown(entry.id, e)}
+                      onPointerDown={(e) => handleEntryPointerDown(entry.id, e)}
                     />
                   ))
                 )}
@@ -536,13 +588,14 @@ const EntryItem: React.FC<{
   isDragged: boolean;
   isDragMode: boolean;
   onClick: () => void;
-  onMouseDown: (e: React.MouseEvent) => void;
-}> = ({ entry, isSelected, isDragged, isDragMode, onClick, onMouseDown }) => {
+  onPointerDown: (e: React.PointerEvent) => void;
+}> = ({ entry, isSelected, isDragged, isDragMode, onClick, onPointerDown }) => {
   const date = formatDateShort(String(entry.timestamp));
   return (
     <div
-      onMouseDown={onMouseDown}
+      onPointerDown={onPointerDown}
       onClick={onClick}
+      style={{ touchAction: "none" }}
       className={`flex items-start gap-1.5 px-2 py-1.5 rounded-md transition-colors ${
         isDragged
           ? "bg-mutter-primary/30 opacity-60 cursor-grabbing"

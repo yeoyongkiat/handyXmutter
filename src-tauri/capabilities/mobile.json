@@ -3,6 +3,12 @@
   "platforms": ["android", "iOS"],
   "windows": ["main"],
   "permissions": [
-    "clipboard-manager:default"
+    "clipboard-manager:default",
+    "dialog:default",
+    "fs:default",
+    "opener:default",
+    "os:default",
+    "process:default",
+    "store:default"
   ]
 }
