@@ -19,6 +19,7 @@ export interface JournalEntry {
 }
 
 export interface MeetingSegment {
+  id: number | null;
   speaker: number | null;
   start_ms: number;
   end_ms: number;
@@ -501,6 +502,12 @@ export const videoCommands = {
   getSegments: (entryId: number) =>
     invoke<MeetingSegment[]>("get_meeting_segments", { entryId }),
 
+  updateSegmentText: (segmentId: number, text: string) =>
+    invoke<void>("update_meeting_segment_text", { segmentId, text }),
+
+  updateSegmentSpeaker: (segmentId: number, speaker: number | null) =>
+    invoke<void>("update_meeting_segment_speaker", { segmentId, speaker }),
+
   updateSpeakerName: (entryId: number, speakerId: number, name: string) =>
     invoke<void>("update_meeting_speaker_name", { entryId, speakerId, name }),
 
@@ -560,6 +567,12 @@ export const meetingCommands = {
 
   getSegments: (entryId: number) =>
     invoke<MeetingSegment[]>("get_meeting_segments", { entryId }),
+
+  updateSegmentText: (segmentId: number, text: string) =>
+    invoke<void>("update_meeting_segment_text", { segmentId, text }),
+
+  updateSegmentSpeaker: (segmentId: number, speaker: number | null) =>
+    invoke<void>("update_meeting_segment_speaker", { segmentId, speaker }),
 
   updateSpeakerName: (entryId: number, speakerId: number, name: string) =>
     invoke<void>("update_meeting_speaker_name", { entryId, speakerId, name }),

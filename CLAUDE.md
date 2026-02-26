@@ -44,7 +44,7 @@ curl -o src-tauri/resources/models/silero_vad_v4.onnx https://blob.handy.compute
 
 ## Architecture Overview
 
-Handy is a cross-platform desktop speech-to-text app built with Tauri 2.x (Rust backend + React/TypeScript frontend).
+Handy is a cross-platform speech-to-text app built with Tauri 2.x (Rust backend + React/TypeScript frontend). Desktop (macOS/Windows/Linux) is fully functional. Android support is in progress (Phase 1 complete — compiles for `aarch64-linux-android`).
 
 ### Backend Structure (src-tauri/src/)
 
@@ -61,6 +61,8 @@ Handy is a cross-platform desktop speech-to-text app built with Tauri 2.x (Rust 
 - `commands/` - Tauri command handlers for frontend communication
   - `journal.rs` - 28 journal commands + `dedup_consecutive_words()` utility + `update_entry_after_processing`
   - `video.rs` - Video feature commands (yt-dlp management, YouTube audio download, video import, source-filtered CRUD)
+  - `meeting.rs` - Meeting/diarization commands (model management, diarized transcription, source-filtered CRUD, speaker names)
+- `diarize.rs` - Speaker diarization via pyannote-rs (ONNX model download, segmentation, embedding, speaker assignment)
 - `ytdlp.rs` - yt-dlp binary management (download/install binary, download audio, fetch video title via `tokio::process::Command`)
 - `shortcut.rs` - Global keyboard shortcut handling
 - `settings.rs` - Application settings management
@@ -120,7 +122,7 @@ src/i18n/
 - Sidebar has two modes (Handy / Mutter) with CSS transition animations between them
 - Clicking the mutter logo at the bottom of Handy's sidebar switches to the Mutter sidebar
 - Mutter sidebar shows the mutter logo at top, a file explorer with folders and journal entries, and Handy logo at bottom to switch back
-- The content/preview panel shows a tab bar at top (Journal tab, Video tab)
+- The content/preview panel shows a tab bar at top (Journal, URL, Meeting tabs)
 - Cross-component state (sidebar ↔ content panel) managed via `src/stores/mutterStore.ts` (Zustand)
 
 ### Search
@@ -128,6 +130,7 @@ src/i18n/
 - Plain text: searches entry titles (case-insensitive)
 - `@query`: searches folder names, shows entries in matching folders
 - `#query`: searches tags
+- `/s query`: searches by user_source field
 - `::date`: searches by date — `today`, `yesterday`, `this week`, `last month`, `jan 2025`, `2025-01`, month names
 - `[query]`: finds entries that link to entries whose title matches query
 - `?` icon in search bar shows tooltip explaining syntax (rendered via React portal on document.body)
@@ -145,8 +148,9 @@ src/i18n/
 ### Backend (src-tauri/src/)
 - `managers/journal.rs` - JournalManager with `journal.db` (SQLite) and `journal_recordings/` directory
   - DB tables: `journal_entries`, `journal_folders`, `journal_chat_sessions`, `journal_chat_messages`, `meeting_segments`
-  - 6 migrations: initial schema, folders/folder_id column, transcript_snapshots column, chat sessions/messages tables, source/source_url columns, meeting segments/speaker_names
+  - 7 migrations: initial schema, folders/folder_id column, transcript_snapshots column, chat sessions/messages tables, source/source_url columns, meeting segments/speaker_names, user_source column
   - `journal_entries` has `source` column (`voice`, `youtube`, `video`, `meeting`) and optional `source_url`
+  - `journal_entries` has `user_source` column (user-editable free-text source/reference field, searchable via `/s` prefix)
   - `journal_entries` has `speaker_names` column (JSON map of speaker_id → custom name, for meeting entries)
   - `journal_folders` has `source` column (`voice`, `video`, `meeting`) to separate journal, video, and meeting folders
   - Folders correspond to real filesystem directories inside `journal_recordings/`
@@ -158,18 +162,26 @@ src/i18n/
   - `import_video_for_journal` - Extracts audio from video files via symphonia, resamples to 16kHz mono, transcribes in chunks
   - `get_video_entries`, `get_video_folders`, `create_video_folder`, `save_video_entry` - Source-filtered CRUD
   - `transcribe_chunked()` helper - Splits long audio into 30-second segments to avoid Parakeet ORT errors
+- `commands/meeting.rs` - 10 Tauri commands for meeting/diarization feature
+  - `check_diarize_models_installed`, `install_diarize_models` - pyannote model management
+  - `transcribe_meeting` - Diarized transcription pipeline (WAV → diarize → transcribe per segment → store)
+  - `diarize_entry` - Adds speaker segments to any existing entry (video, meeting)
+  - `get_meeting_entries`, `get_meeting_folders`, `create_meeting_folder`, `save_meeting_entry` - Source-filtered CRUD
+  - `get_meeting_segments`, `update_meeting_speaker_name`, `get_meeting_speaker_names` - Segment/speaker queries
+- `diarize.rs` - Speaker diarization via pyannote-rs (segmentation + embedding ONNX models, auto-downloaded to app data dir)
 
 ### Frontend (src/)
-- `lib/journal.ts` - TypeScript types, `MUTTER_DEFAULT_PROMPTS`, `MUTTER_DEFAULT_CHAT_INSTRUCTIONS`, `getModelContextWindow()`, `journalCommands` and `videoCommands` wrappers
-- `stores/mutterStore.ts` - Zustand store for `selectedEntryId`, `expandedFolderIds`, `searchQuery`, `promptOverrides`, `selectedVideoEntryId`, `selectedVideoFolderId`, `processingEntries` (tracks in-progress downloads/imports)
-- `components/mutter/MutterPanel.tsx` - Tab bar (Journal + Video) + content routing via `JournalSettingsWithStore` and `VideoSettingsWithStore`
+- `lib/journal.ts` - TypeScript types, `MUTTER_DEFAULT_PROMPTS`, `MUTTER_DEFAULT_CHAT_INSTRUCTIONS`, `getModelContextWindow()`, `journalCommands`, `videoCommands`, and `meetingCommands` wrappers
+- `stores/mutterStore.ts` - Zustand store for `selectedEntryId`, `expandedFolderIds`, `searchQuery`, `promptOverrides`, `selectedVideoEntryId`, `selectedVideoFolderId`, `selectedMeetingEntryId`, `selectedMeetingFolderId`, `processingEntries` (tracks in-progress downloads/imports)
+- `components/mutter/MutterPanel.tsx` - Tab bar (Journal + Video + Meeting) + content routing via `JournalSettingsWithStore`, `VideoSettingsWithStore`, and `MeetingSettingsWithStore`
 - `components/mutter/MutterSettings.tsx` - Prompt customization with reset-to-default icons, storage location picker
 - `components/settings/journal/JournalSettings.tsx` - Full journal/video UI with subcomponents:
   - `WelcomeView`, `FoldersView`, `FolderDetailView`, `NewEntryView`, `RecordingView`, `DraftView`, `ImportingView`, `SearchResultsView`
-  - `VideoNewEntryView` - Two cards: YouTube (download audio + transcribe via yt-dlp) and Import Video (extract audio + transcribe)
+  - `FolderDetailView` includes ephemeral folder-level chat assistant (floating button, context built from folder entries)
   - `YouTubeInputView` - URL input for YouTube audio download
-  - `DetailView` - Entry detail with inline editing, prompt pipeline, jots, chat history, chat assistant. Shows processing overlay for in-progress downloads/imports
-  - Parameterized by `source` prop (`"voice"` | `"video"`) — determines which commands to use and which new-entry flow to show
+  - `DetailView` - Entry detail with inline editing, prompt pipeline, jots, chat history, chat assistant, diarized transcript view with JotterEditor per segment (meeting/video only), user_source field. Shows processing overlay for in-progress downloads/imports
+  - `DiarizedTranscriptView` - Each segment uses a `JotterEditor` (TipTap WYSIWYG) for seamless inline editing with live markdown rendering. Speaker reassignment, rename, re-diarize controls shown post-transcription only
+  - Parameterized by `source` prop (`"voice"` | `"video"` | `"meeting"`) — determines which commands to use and which new-entry flow to show
 
 ### Post-Processing Pipeline
 - `MUTTER_DEFAULT_PROMPTS`: Clean → Structure → Organise → Report (sequential unlock)
@@ -189,6 +201,8 @@ src/i18n/
 - LLM responses: no shaded background box, paragraph spacing via `[&_p]:mb-3`
 - Double-click session title to rename (title span has `onClick stopPropagation` to prevent parent click from firing)
 - LLM-generated chat titles on first close; context window meter with auto-compaction at 80%
+- Chat header breadcrumb "mutter" is clickable — resets chat state back to mode picker
+- **Folder-level chat**: Ephemeral (non-persistent) chat in FolderDetailView. Floating button opens sticky chat panel. System prompt built client-side from folder context (name, entry count, date range, tags, entry titles + previews). Reuses `journal_chat` backend command.
 
 ### Key Patterns
 - Journal commands registered in both `bindings.ts` and `lib/journal.ts`; frontend uses manual wrappers from `lib/journal.ts`
@@ -208,14 +222,21 @@ src/i18n/
 - **Video import**: Uses `symphonia` crate to extract audio from MP4/MKV/WebM containers (AAC, Vorbis, MP3, PCM codecs). Resamples to 16kHz mono, transcribes in chunks via TranscriptionManager, saves extracted audio as WAV. Entries have `source="video"`.
 - **Processing persistence**: YouTube downloads and video imports create a pending entry immediately (empty fileName/transcription), navigate to DetailView, and process in the background. Progress tracked in `processingEntries` Zustand store. DetailView shows processing overlay with status and progress bar. JournalEntryCard shows spinner for in-progress entries. `update_entry_after_processing` backend command updates file_name, title, and transcription when done.
 - **Shared infrastructure**: Video entries use the same `journal_entries`/`journal_folders` tables, same post-processing pipeline, same chat/jots system. Separated by `source` column filtering.
-- **JournalSettings parameterized**: Accepts `source` prop (`"voice"` | `"video"` | `"meeting"`). Voice shows Record/Import Audio; Video shows YouTube/Import Video; Meeting shows model setup + record. All folder/entry management is identical.
+- **JournalSettings parameterized**: Accepts `source` prop (`"voice"` | `"video"` | `"meeting"`). Voice shows Record/Import Audio; Video shows YouTube URL input; Meeting shows record + import. All auto-diarize with 1 speaker default. Diarize controls only in post-transcription DetailView.
 - **Important**: When creating entries with empty `file_name` (pending entries), `save_entry_with_source` must check `!file_name.is_empty() && src_path.is_file()` before rename — otherwise `root.join("")` resolves to the recordings directory itself and `fs::rename` fails with EINVAL.
 
 ### Meeting Feature (Speaker Diarization)
 - **Third tab**: Meetings tab in MutterPanel alongside Journal and Video
 - **Speaker diarization**: Uses `pyannote-rs` (native Rust, same `ort = 2.0.0-rc.10` as `transcribe-rs`) for speaker segmentation and embedding
-- **Pipeline**: Record audio → Stop → Save WAV → pyannote-rs segments → transcribe-rs per segment → merge with speaker labels → store
-- **
+- **ONNX models**: segmentation-3.0.onnx + wespeaker_en_voxceleb_CAM++.onnx, auto-downloaded to `app_data_dir()/diarize_models/` on first use. Download progress emitted via `diarize-download-progress` event
+- **Pipeline**: Record audio → Stop → Save WAV → auto-diarize (1 speaker default, 0.5 threshold) → transcribe per segment → merge with speaker labels → store in `meeting_segments` table
+- **Diarization parameters**: Configurable `max_speakers` (default 1, range 1-20) and `threshold` (default 0.5, range 0.0-1.0). Lower threshold = more speakers distinguished. Controls only shown post-transcription in DetailView when user toggles "Show speakers"
+- **UX flow**: All entry types (YouTube URL, video import, meeting recording, meeting import) auto-diarize with 1 speaker default immediately after transcription. User can re-diarize with different parameters from the DetailView speaker controls
+- **No diarization for journal tab**: Voice entries (journal tab) have no diarization UI
+- **Diarize any entry**: `diarize_entry` command can add speaker segments to video/meeting entries without replacing transcript
+- **DiarizedTranscriptView**: Each segment rendered with JotterEditor (TipTap WYSIWYG) for seamless inline editing — no separate edit mode. Speaker labels, timestamps, editable speaker names (stored in `speaker_names` JSON column). Re-diarize button with adjustable params shown above diarized content
+- **Events**: `meeting-status` (stages: loading → diarizing → transcribing → done), `diarize-status` (same stages for `diarize_entry`)
+- **Shared infrastructure**: Meeting entries use same `journal_entries`/`journal_folders` tables, same post-processing pipeline, same chat/jots system. Separated by `source="meeting"` filtering
 
 This project uses **Tailwind CSS v4** with the `@tailwindcss/vite` plugin. Configuration is CSS-based, NOT via `tailwind.config.js`.
 
@@ -289,6 +310,108 @@ Binary paths (needed when shell profile isn't loaded, e.g., in Claude Code):
 - **macOS**: Metal acceleration, accessibility permissions required
 - **Windows**: Vulkan acceleration, code signing
 - **Linux**: OpenBLAS + Vulkan, limited Wayland support, overlay disabled by default
+- **Android**: In progress — see [Android Port](#android-port) section below
+
+## Android Port
+
+### Status: Phase 1 Complete (Compiles), Phase 2 Pending (Run on Device)
+
+The codebase compiles for `aarch64-linux-android` but the frontend is not yet mobile-responsive. Desktop-only features are gated at compile time — the Android build includes only cross-platform functionality (journal CRUD, folders, chat, history, LLM post-processing, settings).
+
+### Platform Conditional Compilation
+
+Desktop-only code is gated with `#[cfg(not(any(target_os = "android", target_os = "ios")))]`. This applies to:
+
+**Gated Rust modules** (not compiled on Android):
+- `actions`, `audio_feedback`, `audio_toolkit`, `clipboard`, `diarize`, `input`, `overlay`, `shortcut`, `signal_handle`, `transcription_coordinator`, `tray`, `tray_i18n`, `utils`, `ytdlp`
+
+**Gated command modules**: `audio`, `meeting`, `models`, `transcription`, `video`
+
+**Gated commands in journal.rs**: `start_journal_recording`, `stop_journal_recording`, `get_partial_journal_transcription`, `retranscribe_journal_entry`, `import_audio_for_journal`
+
+**Gated managers**: `audio`, `model`, `transcription`
+
+**Gated journal manager methods**: `save_meeting_segments()`, `get_meeting_segments()` (depend on `diarize::DiarizedSegment`)
+
+**Gated history manager**: `save_transcription()` method (depends on `audio_toolkit::save_wav_file`)
+
+**Gated plugins**: `single-instance`, `global-shortcut`, `autostart`, `macos-permissions`
+
+### Desktop-Only Dependencies (Cargo.toml)
+
+These crates are under `[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]`:
+- `cpal`, `rubato`, `rustfft`, `vad-rs` — audio recording/processing
+- `enigo` — keyboard/mouse simulation
+- `rdev` — global input hooks
+- `rodio` — audio playback
+- `symphonia` — audio extraction from video containers
+- `transcribe-rs` — speech-to-text (Whisper/Parakeet/Moonshine)
+- `pyannote-rs` — speaker diarization
+- `handy-keys` — keyboard shortcut handling
+- `tauri-plugin-autostart`, `tauri-plugin-global-shortcut`, `tauri-plugin-single-instance`, `tauri-plugin-macos-permissions`
+
+Cross-platform deps use `reqwest` with `rustls-tls` (not OpenSSL) to avoid Android cross-compilation issues.
+
+### Entry Points (lib.rs)
+
+```rust
+// Desktop: takes CLI args
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn run(cli_args: CliArgs) { run_inner(cli_args); }
+
+// Mobile: no args, annotated with mobile_entry_point
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::mobile_entry_point]
+pub fn run() { run_inner(CliArgs::default()); }
+```
+
+Mobile builds register a reduced set of Tauri commands (journal CRUD, folders, chat, history, settings) via a separate `specta_builder` block.
+
+### Capabilities (src-tauri/capabilities/)
+
+- `default.json` — Cross-platform permissions (fs, store, dialog, opener, clipboard, log, os, process, shell)
+- `desktop.json` — Desktop-only: `global-shortcut:*`, `macos-permissions:default`, `recording_overlay` window. Platforms: `["macOS", "windows", "linux"]`
+- `mobile.json` — Mobile-only: `clipboard-manager:default`. Platforms: `["android", "iOS"]`
+
+### Android Development Setup
+
+**Prerequisites**: JDK 21+, Android SDK, Android NDK 27+
+
+```bash
+# Environment variables
+export JAVA_HOME="/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home"
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+export NDK_HOME="$ANDROID_HOME/ndk/27.0.12077973"
+export CC_aarch64_linux_android="$NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android24-clang"
+export AR_aarch64_linux_android="$NDK_HOME/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar"
+
+# Check compilation
+cargo check --target aarch64-linux-android --lib
+
+# Android dev (once frontend is ready)
+npx tauri android dev
+```
+
+NDK linker paths are configured in `.cargo/config.toml` for all 4 Android targets (aarch64, armv7, i686, x86_64).
+
+### build.rs Notes
+
+`build.rs` runs on the **host** machine, not the target. Use `CARGO_CFG_TARGET_OS` / `CARGO_CFG_TARGET_ARCH` env vars (not `#[cfg]` attributes) to check the compilation target. The Apple Intelligence bridge build is gated this way.
+
+### Known Frontend Issues for Android (Phase 2 TODO)
+
+- No touch events — drag-and-drop uses `mousedown/mousemove/mouseup` only
+- Hover-dependent UI controls invisible on touch (`opacity-0 group-hover:opacity-100`)
+- Fixed 160px sidebar doesn't fit mobile viewports
+- `100vh` includes mobile address bar, causing overflow
+- Touch targets too small (14x14px vs 44x44px minimum)
+- `tauri-plugin-macos-permissions` imported unconditionally in `App.tsx`
+- Desktop-only `onDragDropEvent` used without platform guard
+- No Android audio recording backend yet (needs oboe-rs or Tauri mobile plugin)
+
+### Android Port Plan Reference
+
+Full audit and phased plan at: `.claude/plans/lucky-juggling-cookie.md`
 
 ## Git Workflow
 

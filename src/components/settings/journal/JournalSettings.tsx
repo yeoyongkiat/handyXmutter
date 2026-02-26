@@ -140,7 +140,7 @@ type ViewMode =
   | { mode: "tag"; tag: string; folderId: number; trail: number[] }
   | { mode: "search"; query: string }
   | { mode: "importing"; folderId: number }
-  | { mode: "youtube-input"; folderId: number };
+  | { mode: "youtube-input"; folderId: number }
 
 export type EntrySource = "voice" | "video" | "meeting";
 
@@ -425,11 +425,14 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
       setProcessingEntry(entry.id, "downloading", 0);
       setView({ mode: "detail", entryId: entry.id, folderId, trail: [] });
 
-      // Download + transcribe in background
+      // Download + transcribe in background, then auto-diarize with 1 speaker default
       videoCommands.downloadYouTubeAudio(url).then(async (result) => {
         await videoCommands.updateEntryAfterProcessing(
           entry.id, result.file_name, result.title, result.transcription
         );
+        // Auto-diarize with default 1 speaker
+        setProcessingEntry(entry.id, "diarizing", 0);
+        await videoCommands.diarizeEntry(entry.id, 1, 0.5);
         clearProcessingEntry(entry.id);
         loadData();
       }).catch((error) => {
@@ -454,15 +457,15 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
     })();
     if (!path) return;
 
+    // Import video directly with auto-diarize (1 speaker default)
+    const title = new Date().toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
     try {
-      // Create a pending entry immediately
-      const title = new Date().toLocaleDateString(undefined, {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
       const entry = await videoCommands.saveEntry({
         fileName: "",
         title,
@@ -475,11 +478,13 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
       setProcessingEntry(entry.id, "importing", 0);
       setView({ mode: "detail", entryId: entry.id, folderId, trail: [] });
 
-      // Import + transcribe in background
       videoCommands.importVideo(path).then(async (result) => {
         await videoCommands.updateEntryAfterProcessing(
           entry.id, result.file_name, title, result.transcription_text
         );
+        // Auto-diarize with default 1 speaker
+        setProcessingEntry(entry.id, "diarizing", 0);
+        await videoCommands.diarizeEntry(entry.id, 1, 0.5);
         clearProcessingEntry(entry.id);
         loadData();
       }).catch((error) => {
@@ -499,7 +504,6 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
   const handleMeetingStopRecording = async (folderId: number) => {
     try {
       const result = await journalCommands.stopRecording();
-      // Save entry with source="meeting"
       const title = new Date().toLocaleDateString(undefined, {
         year: "numeric",
         month: "long",
@@ -514,11 +518,10 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
         folderId,
       });
       await loadData();
+      // Auto-diarize with default 1 speaker
       setProcessingEntry(entry.id, "diarizing", 0);
       setView({ mode: "detail", entryId: entry.id, folderId, trail: [] });
-
-      // Run diarize + transcribe pipeline in background
-      meetingCommands.transcribeMeeting(entry.id).then(() => {
+      meetingCommands.transcribeMeeting(entry.id, 1, 0.5).then(() => {
         clearProcessingEntry(entry.id);
         loadData();
       }).catch((error) => {
@@ -542,15 +545,15 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
     })();
     if (!path) return;
 
+    // Import audio directly with auto-diarize (1 speaker default)
+    const title = new Date().toLocaleDateString(undefined, {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
     try {
-      const title = new Date().toLocaleDateString(undefined, {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-      // Create pending meeting entry
       const entry = await meetingCommands.saveEntry({
         fileName: "",
         title,
@@ -561,16 +564,13 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
       setProcessingEntry(entry.id, "importing", 0);
       setView({ mode: "detail", entryId: entry.id, folderId, trail: [] });
 
-      // Import audio (resamples + basic transcription), then run diarized transcription
       meetingCommands.importAudio(path).then(async (result) => {
-        // Update entry with the imported file
         await meetingCommands.updateEntryAfterProcessing(
           entry.id, result.file_name, title, ""
         );
+        // Auto-diarize with default 1 speaker
         setProcessingEntry(entry.id, "diarizing", 0);
-        // Run diarize + per-segment transcribe pipeline
-        return meetingCommands.transcribeMeeting(entry.id);
-      }).then(() => {
+        await meetingCommands.transcribeMeeting(entry.id, 1, 0.5);
         clearProcessingEntry(entry.id);
         loadData();
       }).catch((error) => {
@@ -584,6 +584,7 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
       setView({ mode: "new-entry", folderId });
     }
   };
+
 
   const handleSaved = (folderId: number) => {
     setView({ mode: "folder", folderId });
@@ -725,7 +726,7 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
         onClick={() => handleNewEntry(view.folderId)}
         className="flex items-center gap-2"
       >
-        {source === "video" ? <Video className="w-4 h-4" /> : source === "meeting" ? <Users className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+        {source === "video" ? <Globe className="w-4 h-4" /> : source === "meeting" ? <Users className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
         <span>{t("settings.journal.newEntry")}</span>
       </MutterButton>
     );
@@ -833,9 +834,8 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
         />
       )}
       {view.mode === "new-entry" && source === "video" && (
-        <VideoNewEntryView
-          onYouTube={() => handleYouTubeInput(view.folderId)}
-          onImportVideo={(filePath) => handleImportVideo(view.folderId, filePath)}
+        <YouTubeInputView
+          onSubmit={(url) => handleYouTubeSubmit(view.folderId, url)}
           onCancel={() => setView({ mode: "folder", folderId: view.folderId })}
         />
       )}
@@ -849,7 +849,7 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
       {view.mode === "youtube-input" && (
         <YouTubeInputView
           onSubmit={(url) => handleYouTubeSubmit(view.folderId, url)}
-          onCancel={() => setView({ mode: "new-entry", folderId: view.folderId })}
+          onCancel={() => setView({ mode: "folder", folderId: view.folderId })}
         />
       )}
       {view.mode === "recording" && (
@@ -2225,6 +2225,8 @@ const DetailView: React.FC<{
   const [isDiarizing, setIsDiarizing] = useState(false);
   const [diarizeProgress, setDiarizeProgress] = useState("");
   const [hasSegments, setHasSegments] = useState(false);
+  const [showDiarizedView, setShowDiarizedView] = useState(true);
+  const [diarizeRefreshKey, setDiarizeRefreshKey] = useState(0);
   const [diarizeMaxSpeakers, setDiarizeMaxSpeakers] = useState(6);
   const [diarizeThreshold, setDiarizeThreshold] = useState(0.5);
   const [chatOpen, setChatOpen] = useState(false);
@@ -2367,6 +2369,7 @@ const DetailView: React.FC<{
           meetingCommands.getSegments(entryId).then((segs) => {
             setHasSegments(segs.length > 0);
           });
+          setDiarizeRefreshKey((k) => k + 1);
           loadEntry();
           meetingCommands.getSpeakerNames(entryId).then((names) => {
             speakerNamesRef.current = names;
@@ -3051,60 +3054,67 @@ ${linkedEntryDetails}` : ""}`;
             </div>
           )}
 
-          {/* Diarized transcript (for any entry with segments) */}
-          {!processingInfo && hasSegments && (
+          {/* Diarized transcript (for meeting/video entries with segments, not journal) */}
+          {!processingInfo && hasSegments && entry.source !== "voice" && (
             <div className="mb-4">
-              <label className="text-xs font-medium text-text/60 uppercase tracking-wide mb-2 block">
-                {t("settings.meeting.speaker") + "s"}
-              </label>
-              <DiarizedTranscriptView entryId={entryId} />
+              <div className="flex items-center justify-between mb-2">
+                <label className="text-xs font-medium text-text/60 uppercase tracking-wide">
+                  {t("settings.meeting.speaker") + "s"}
+                </label>
+                <button
+                  onClick={() => setShowDiarizedView(!showDiarizedView)}
+                  className="text-[10px] text-text/40 hover:text-mutter-primary cursor-pointer transition-colors"
+                >
+                  {showDiarizedView ? t("settings.journal.showTranscript") : t("settings.journal.showSpeakers")}
+                </button>
+              </div>
+              {/* Diarization controls (speakers, threshold, re-diarize) below header */}
+              {showDiarizedView && entry.file_name && entry.file_name.endsWith(".wav") && (
+                <div className="mb-3 flex items-center gap-3 flex-wrap">
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-[10px] text-text/50">{t("settings.meeting.expectedSpeakers")}</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={diarizeMaxSpeakers}
+                      onChange={(e) => setDiarizeMaxSpeakers(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+                      className="w-12 px-1.5 py-0.5 text-xs rounded border border-mid-gray/20 bg-background text-text"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-[10px] text-text/50">{t("settings.meeting.threshold")}</label>
+                    <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={diarizeThreshold}
+                      onChange={(e) => setDiarizeThreshold(Number(e.target.value))}
+                      className="w-20 h-1 accent-mutter-primary"
+                    />
+                    <span className="text-[10px] text-text/50 w-7">{diarizeThreshold.toFixed(2)}</span>
+                  </div>
+                  <button
+                    onClick={() => handleDiarize(diarizeMaxSpeakers, diarizeThreshold)}
+                    disabled={isDiarizing || processingPromptId !== null}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-md bg-mutter-primary text-white hover:bg-mutter-primary/80 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Users className="w-3 h-3" />
+                    {isDiarizing
+                      ? diarizeProgress
+                        ? `${t("settings.meeting.diarizing").replace("...", "")} (${diarizeProgress})`
+                        : t("settings.meeting.diarizing")
+                      : hasSegments ? t("settings.meeting.reDiarize") : t("settings.journal.diarize")}
+                  </button>
+                </div>
+              )}
+              {showDiarizedView && <DiarizedTranscriptView key={diarizeRefreshKey} entryId={entryId} />}
             </div>
           )}
 
-          {/* Diarization controls (visible when entry has audio) */}
-          {!processingInfo && entry.file_name && entry.file_name.endsWith(".wav") && (
-            <div className="mb-4 flex items-center gap-3 flex-wrap">
-              <div className="flex items-center gap-1.5">
-                <label className="text-[10px] text-text/50">{t("settings.meeting.expectedSpeakers")}</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={20}
-                  value={diarizeMaxSpeakers}
-                  onChange={(e) => setDiarizeMaxSpeakers(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
-                  className="w-12 px-1.5 py-0.5 text-xs rounded border border-mid-gray/20 bg-background text-text"
-                />
-              </div>
-              <div className="flex items-center gap-1.5">
-                <label className="text-[10px] text-text/50">{t("settings.meeting.threshold")}</label>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.05}
-                  value={diarizeThreshold}
-                  onChange={(e) => setDiarizeThreshold(Number(e.target.value))}
-                  className="w-20 h-1 accent-mutter-primary"
-                />
-                <span className="text-[10px] text-text/50 w-7">{diarizeThreshold.toFixed(2)}</span>
-              </div>
-              <button
-                onClick={() => handleDiarize(diarizeMaxSpeakers, diarizeThreshold)}
-                disabled={isDiarizing || processingPromptId !== null}
-                className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-md bg-mutter-primary text-white hover:bg-mutter-primary/80 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Users className="w-3 h-3" />
-                {isDiarizing
-                  ? diarizeProgress
-                    ? `${t("settings.meeting.diarizing").replace("...", "")} (${diarizeProgress})`
-                    : t("settings.meeting.diarizing")
-                  : hasSegments ? t("settings.meeting.reDiarize") : t("settings.journal.diarize")}
-              </button>
-            </div>
-          )}
-
-          {/* Transcription (hidden for meetings — use NOMs chat instead) */}
-          {!processingInfo && !isMeetingEntry && <div>
+          {/* Transcription (hidden when diarized view is showing for entries with segments) */}
+          {!processingInfo && !(hasSegments && showDiarizedView && entry.source !== "voice") && <div>
             <div className="flex items-center justify-between">
               <label className="text-xs font-medium text-text/60 uppercase tracking-wide">
                 {t("settings.journal.transcription")}
@@ -3122,7 +3132,7 @@ ${linkedEntryDetails}` : ""}`;
             )}
             <div className="mt-2">
               <JotterEditor
-                content={editTranscription}
+                content={hasSegments && !showDiarizedView ? editTranscription.replace(/\[(?:Speaker \d+|Unknown)\]\s*/g, "") : editTranscription}
                 onChange={handleTranscriptionChange}
                 placeholder={t("settings.journal.transcription")}
                 tags={allKnownTags}
@@ -3933,6 +3943,7 @@ const JournalEntryCard: React.FC<{
   );
 };
 
+
 // --- Video New Entry View (choose YouTube or Import Video) ---
 
 const VideoNewEntryView: React.FC<{
@@ -4423,6 +4434,15 @@ const SPEAKER_DOT_COLORS = [
   "bg-teal-500",
 ];
 
+const SPEAKER_BG_COLORS = [
+  "bg-blue-500/8",
+  "bg-green-500/8",
+  "bg-orange-500/8",
+  "bg-purple-500/8",
+  "bg-pink-500/8",
+  "bg-teal-500/8",
+];
+
 function formatMs(ms: number): string {
   const totalSeconds = Math.floor(ms / 1000);
   const minutes = Math.floor(totalSeconds / 60);
@@ -4430,14 +4450,49 @@ function formatMs(ms: number): string {
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
+// Wrapper for a single diarized segment using JotterEditor
+const DiarizedSegmentEditor: React.FC<{
+  segment: MeetingSegment;
+  onChange: (segmentId: number, text: string) => void;
+}> = ({ segment, onChange }) => {
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleChange = useCallback((text: string) => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      if (segment.id != null) onChange(segment.id, text);
+      saveTimer.current = null;
+    }, 500);
+  }, [segment.id, onChange]);
+
+  // Flush pending save on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, []);
+
+  return (
+    <JotterEditor
+      content={segment.text}
+      onChange={handleChange}
+      placeholder=""
+      tags={[]}
+      entries={[]}
+      folders={[]}
+    />
+  );
+};
+
 export const DiarizedTranscriptView: React.FC<{
   entryId: number;
 }> = ({ entryId }) => {
   const { t } = useTranslation();
   const [segments, setSegments] = useState<MeetingSegment[]>([]);
   const [speakerNames, setSpeakerNames] = useState<Record<string, string>>({});
-  const [editingSpeaker, setEditingSpeaker] = useState<number | null>(null);
+  const [editingSpeakerName, setEditingSpeakerName] = useState<number | null>(null);
   const [editName, setEditName] = useState("");
+  const [reassigningSegmentId, setReassigningSegmentId] = useState<number | null>(null);
 
   useEffect(() => {
     meetingCommands.getSegments(entryId).then(setSegments);
@@ -4453,8 +4508,27 @@ export const DiarizedTranscriptView: React.FC<{
     } catch (error) {
       console.error("Failed to rename speaker:", error);
     }
-    setEditingSpeaker(null);
+    setEditingSpeakerName(null);
     setEditName("");
+  };
+
+  const handleSaveSegmentText = useCallback(async (segmentId: number, text: string) => {
+    try {
+      await meetingCommands.updateSegmentText(segmentId, text);
+      setSegments((prev) => prev.map((s) => s.id === segmentId ? { ...s, text } : s));
+    } catch (error) {
+      console.error("Failed to save segment text:", error);
+    }
+  }, []);
+
+  const handleReassignSpeaker = async (segmentId: number, newSpeaker: number | null) => {
+    try {
+      await meetingCommands.updateSegmentSpeaker(segmentId, newSpeaker);
+      setSegments((prev) => prev.map((s) => s.id === segmentId ? { ...s, speaker: newSpeaker } : s));
+    } catch (error) {
+      console.error("Failed to reassign speaker:", error);
+    }
+    setReassigningSegmentId(null);
   };
 
   const getSpeakerLabel = (speaker: number | null): string => {
@@ -4466,55 +4540,104 @@ export const DiarizedTranscriptView: React.FC<{
   if (segments.length === 0) return null;
 
   // Detect unique speakers
-  const uniqueSpeakers = new Set(segments.map((s) => s.speaker).filter((s) => s !== null));
+  const uniqueSpeakers = [...new Set(segments.map((s) => s.speaker).filter((s): s is number => s !== null))];
 
   return (
-    <div className="space-y-1">
-      {uniqueSpeakers.size > 0 && (
+    <div className="space-y-0">
+      {uniqueSpeakers.length > 0 && (
         <p className="text-xs text-text/40 mb-3">
-          {t("settings.meeting.speakersDetected", { count: uniqueSpeakers.size })}
+          {t("settings.meeting.speakersDetected", { count: uniqueSpeakers.length })}
         </p>
       )}
       {segments.map((seg, i) => {
         const colorIdx = (seg.speaker ?? 0) % SPEAKER_COLORS.length;
+        const isNewSpeaker = i === 0 || seg.speaker !== segments[i - 1].speaker;
+        const isReassigning = reassigningSegmentId === seg.id;
         return (
-          <div key={i} className="flex gap-3 py-2">
+          <div key={seg.id ?? i} className={`flex gap-3 ${isNewSpeaker ? "pt-3 pb-1.5" : "py-1"} px-2 rounded-sm ${SPEAKER_BG_COLORS[colorIdx]} group`}>
             <div className="flex flex-col items-center shrink-0 w-14">
               <span className="text-[10px] text-text/30 font-mono">
                 {formatMs(seg.start_ms)}
               </span>
             </div>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5 mb-0.5">
-                <span className={`w-2 h-2 rounded-full shrink-0 ${SPEAKER_DOT_COLORS[colorIdx]}`} />
-                {editingSpeaker === seg.speaker ? (
-                  <input
-                    autoFocus
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleRenameSpeaker(seg.speaker!);
-                      if (e.key === "Escape") setEditingSpeaker(null);
-                    }}
-                    onBlur={() => handleRenameSpeaker(seg.speaker!)}
-                    className="text-xs font-semibold bg-transparent border-b border-mutter-primary outline-none px-0 py-0 w-32"
+              {isNewSpeaker && (
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <span className={`w-2 h-2 rounded-full shrink-0 ${SPEAKER_DOT_COLORS[colorIdx]}`} />
+                  {editingSpeakerName === seg.speaker ? (
+                    <input
+                      autoFocus
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleRenameSpeaker(seg.speaker!);
+                        if (e.key === "Escape") setEditingSpeakerName(null);
+                      }}
+                      onBlur={() => handleRenameSpeaker(seg.speaker!)}
+                      className="text-xs font-semibold bg-transparent border-b border-mutter-primary outline-none px-0 py-0 w-32"
+                    />
+                  ) : (
+                    <button
+                      onClick={() => {
+                        if (seg.speaker !== null) {
+                          setEditingSpeakerName(seg.speaker);
+                          setEditName(speakerNames[String(seg.speaker)] || "");
+                        }
+                      }}
+                      className={`text-xs font-semibold cursor-pointer hover:underline ${SPEAKER_COLORS[colorIdx]}`}
+                      title={t("settings.meeting.renameSpeaker")}
+                    >
+                      {getSpeakerLabel(seg.speaker)}
+                    </button>
+                  )}
+                </div>
+              )}
+              <div className="relative">
+                <div className="diarized-segment-editor text-sm text-text/80 leading-relaxed">
+                  <DiarizedSegmentEditor
+                    segment={seg}
+                    onChange={handleSaveSegmentText}
                   />
-                ) : (
+                </div>
+                {/* Speaker reassign button — visible on hover */}
+                {seg.id != null && !isReassigning && (
                   <button
-                    onClick={() => {
-                      if (seg.speaker !== null) {
-                        setEditingSpeaker(seg.speaker);
-                        setEditName(speakerNames[String(seg.speaker)] || "");
-                      }
-                    }}
-                    className={`text-xs font-semibold cursor-pointer hover:underline ${SPEAKER_COLORS[colorIdx]}`}
-                    title={t("settings.meeting.renameSpeaker")}
+                    onClick={(e) => { e.stopPropagation(); setReassigningSegmentId(seg.id); }}
+                    className="absolute -right-1 top-0 opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-text/30 hover:text-mutter-primary cursor-pointer"
+                    title={t("settings.meeting.reassignSpeaker")}
                   >
-                    {getSpeakerLabel(seg.speaker)}
+                    <Users className="w-3 h-3" />
                   </button>
                 )}
+                {/* Speaker reassign picker */}
+                {isReassigning && (
+                  <div className="flex items-center gap-1 mt-1">
+                    {uniqueSpeakers.map((spk) => {
+                      const ci = spk % SPEAKER_COLORS.length;
+                      return (
+                        <button
+                          key={spk}
+                          onClick={() => handleReassignSpeaker(seg.id!, spk)}
+                          className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] border cursor-pointer transition-colors ${
+                            seg.speaker === spk
+                              ? "border-mutter-primary bg-mutter-primary/10"
+                              : "border-mid-gray/20 hover:border-mutter-primary/50"
+                          }`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${SPEAKER_DOT_COLORS[ci]}`} />
+                          <span className={SPEAKER_COLORS[ci]}>{getSpeakerLabel(spk)}</span>
+                        </button>
+                      );
+                    })}
+                    <button
+                      onClick={() => setReassigningSegmentId(null)}
+                      className="text-text/30 hover:text-text/60 cursor-pointer ml-1"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
               </div>
-              <p className="text-sm text-text/80 leading-relaxed">{seg.text}</p>
             </div>
           </div>
         );

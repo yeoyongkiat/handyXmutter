@@ -381,7 +381,7 @@ pub async fn get_video_entries(
     journal_manager: State<'_, Arc<JournalManager>>,
 ) -> Result<Vec<JournalEntry>, String> {
     journal_manager
-        .get_entries_by_source(Some("video"))
+        .get_entries_by_sources(&["video", "youtube"])
         .await
         .map_err(|e| e.to_string())
 }

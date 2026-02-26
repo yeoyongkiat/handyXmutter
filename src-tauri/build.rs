@@ -1,6 +1,11 @@
 fn main() {
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    build_apple_intelligence_bridge();
+    // Apple Intelligence bridge only for macOS aarch64 targets
+    // Note: build.rs runs on the host, so we check CARGO_CFG_TARGET_* env vars
+    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    let target_arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
+    if target_os == "macos" && target_arch == "aarch64" {
+        build_apple_intelligence_bridge();
+    }
 
     generate_tray_translations();
 

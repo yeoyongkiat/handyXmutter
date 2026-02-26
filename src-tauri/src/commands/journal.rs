@@ -1,7 +1,13 @@
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use crate::commands::video::transcribe_chunked;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::journal::{
-    ChatMessage, ChatSession, JournalEntry, JournalFolder, JournalManager, JournalRecordingResult,
+    ChatMessage, ChatSession, JournalEntry, JournalFolder, JournalManager,
 };
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use crate::managers::journal::JournalRecordingResult;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::managers::transcription::TranscriptionManager;
 use std::sync::Arc;
 use tauri::{AppHandle, State};
@@ -28,6 +34,7 @@ fn dedup_consecutive_words(text: &str) -> String {
     result
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 #[specta::specta]
 pub async fn start_journal_recording(
@@ -47,6 +54,7 @@ pub async fn start_journal_recording(
     Ok(())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 #[specta::specta]
 pub async fn stop_journal_recording(
@@ -84,6 +92,7 @@ pub async fn stop_journal_recording(
 
 /// Get a partial transcription of the audio recorded so far (live transcription).
 /// Returns the transcription text, or an empty string if no audio is available yet.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 #[specta::specta]
 pub async fn get_partial_journal_transcription(
@@ -335,6 +344,7 @@ pub async fn get_journal_audio_file_path(
         .map(|s| s.to_string())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 #[specta::specta]
 pub async fn retranscribe_journal_entry(
@@ -367,10 +377,8 @@ pub async fn retranscribe_journal_entry(
     // Ensure model is loaded
     transcription_manager.initiate_model_load();
 
-    // Transcribe
-    let transcription = transcription_manager
-        .transcribe(samples)
-        .map_err(|e| format!("Transcription failed: {}", e))?;
+    // Transcribe (chunked to avoid ORT errors on long audio)
+    let transcription = transcribe_chunked(&transcription_manager, samples)?;
 
     // Update the entry's transcription text in DB (reset prompt_id and clear snapshots)
     journal_manager
@@ -540,6 +548,7 @@ pub async fn update_entry_after_processing(
 
 // --- Import audio command ---
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 #[specta::specta]
 pub async fn import_audio_for_journal(
@@ -614,10 +623,8 @@ pub async fn import_audio_for_journal(
     // Ensure model is loaded
     transcription_manager.initiate_model_load();
 
-    // Transcribe
-    let transcription = transcription_manager
-        .transcribe(resampled)
-        .map_err(|e| format!("Transcription failed: {}", e))?;
+    // Transcribe (chunked to avoid ORT errors on long audio)
+    let transcription = transcribe_chunked(&transcription_manager, resampled)?;
 
     // Copy to journal recordings dir with new name (temporary; renamed on save_entry)
     let timestamp = chrono::Utc::now().timestamp();

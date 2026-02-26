@@ -253,6 +253,7 @@ pub async fn transcribe_meeting(
             flat_lines.push(format!("{} {}", speaker_label, trimmed));
 
             diarized_segments.push(DiarizedSegment {
+                id: None,
                 speaker: seg.speaker,
                 start_ms: seg.start_ms,
                 end_ms: seg.end_ms,
@@ -430,6 +431,7 @@ pub async fn diarize_entry(
         let trimmed = text.trim().to_string();
         if !trimmed.is_empty() {
             diarized_segments.push(DiarizedSegment {
+                id: None,
                 speaker: seg.speaker,
                 start_ms: seg.start_ms,
                 end_ms: seg.end_ms,
@@ -467,6 +469,32 @@ pub async fn get_meeting_segments(
 ) -> Result<Vec<DiarizedSegment>, String> {
     journal_manager
         .get_meeting_segments(entry_id)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn update_meeting_segment_text(
+    segment_id: i64,
+    text: String,
+    journal_manager: State<'_, Arc<JournalManager>>,
+) -> Result<(), String> {
+    journal_manager
+        .update_segment_text(segment_id, text)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn update_meeting_segment_speaker(
+    segment_id: i64,
+    speaker: Option<i32>,
+    journal_manager: State<'_, Arc<JournalManager>>,
+) -> Result<(), String> {
+    journal_manager
+        .update_segment_speaker(segment_id, speaker)
         .await
         .map_err(|e| e.to_string())
 }

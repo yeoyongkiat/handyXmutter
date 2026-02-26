@@ -201,6 +201,25 @@
   text-decoration: underline;
 }
 
+/* Compact jotter editor for diarized segments */
+.diarized-segment-editor .jotter-editor {
+  overflow-y: visible;
+}
+
+.diarized-segment-editor .jotter-editor .tiptap {
+  padding-top: 0;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.diarized-segment-editor .jotter-editor .tiptap p {
+  margin-bottom: 0.25rem;
+}
+
+.diarized-segment-editor .jotter-editor .tiptap p:last-child {
+  margin-bottom: 0;
+}
+
 /* Mention badges */
 .jotter-mention {
   display: inline-flex;

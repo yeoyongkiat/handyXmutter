@@ -10,7 +10,7 @@
   <a href="https://github.com/cjpais/Handy">
     <img src="https://img.shields.io/badge/built%20on-Handy-ff69b4?style=flat-square" alt="Built on Handy" />
   </a>
-  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue?style=flat-square" alt="Platform" />
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux%20%7C%20Android%20(WIP)-blue?style=flat-square" alt="Platform" />
   <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License" />
 </p>
 
@@ -40,6 +40,17 @@ handyXmutter is what happens when you take that invitation seriously. Every feat
 - **Instant transcription** — Powered by Handy's offline Whisper/Parakeet models
 - **Inline editing** — Click to edit titles, transcripts auto-save with debounce
 
+### Video & YouTube Transcription
+- **YouTube audio download** — Paste a URL, automatically download audio via yt-dlp, transcribe offline
+- **Local video import** — Import MP4/MKV/WebM files, extract and transcribe the audio
+- **Same journal workflow** — Video entries get the full post-processing pipeline, chat, tags, and folders
+
+### Meeting Diarization
+- **Speaker identification** — Record meetings and automatically identify who said what using pyannote speaker diarization
+- **Per-segment editing** — Each speaker segment has its own inline editor (TipTap WYSIWYG)
+- **Re-diarize** — Adjust speaker count and sensitivity threshold, re-run diarization from the detail view
+- **Custom speaker names** — Rename "Speaker 0" to real names, persisted across sessions
+
 ### AI Post-Processing Pipeline
 Sequential prompt pipeline that progressively refines your transcript:
 
@@ -60,7 +71,7 @@ Four modes for interacting with your journal entries:
 - **Sharpen** — Summarise, paraphrase, and reframe. Grounded in your content.
 - **Brainstorm** — Thinking coach — asks probing questions, challenges assumptions, encourages deeper reflection.
 
-Chat sessions are persistent (stored in SQLite) and resume where you left off.
+Chat sessions are persistent (stored in SQLite) and resume where you left off. Folder-level chat is also available — ask questions across all entries in a folder.
 
 ### Search
 Search bar in the sidebar with advanced syntax:
@@ -70,12 +81,14 @@ Search bar in the sidebar with advanced syntax:
 | `text` | Entry titles |
 | `@query` | Folder names (shows entries in matching folders) |
 | `#query` | Tags |
+| `/s query` | Source/reference field |
 | `::date` | Dates — `today`, `this week`, `jan 2025`, `2025-01` |
 | `[name]` | Entries linked to entries matching the name |
 
 ### Tags & Links
 - **Tags** — Add custom tags to entries, click tag badges to browse by tag
 - **Linked entries** — Connect related journal entries, navigate between them via breadcrumb trail
+- **Source metadata** — Add a user-editable source/reference field to any entry
 
 ### File Management
 - **Markdown sync** — Every transcript, chat, and jot is automatically written as `.md` files alongside the audio
@@ -90,7 +103,7 @@ Since handyXmutter is built on Handy, you also get:
 - Multi-language support
 - Recording overlay
 - Transcription history
-- Cross-platform (macOS, Windows, Linux)
+- Cross-platform (macOS, Windows, Linux — Android in progress)
 
 ## Getting Started
 
@@ -135,24 +148,38 @@ CMAKE_POLICY_VERSION_MINIMUM=3.5 bun run tauri dev
 handyXmutter extends Handy's architecture without modifying its core contracts:
 
 ```
-┌─────────────────────────────────────────────┐
-│               handyXmutter                   │
-│  ┌──────────┐  ┌──────────┐  ┌───────────┐  │
-│  │ Journal   │  │ Chat     │  │ Search    │  │
-│  │ Manager   │  │ Sessions │  │ (client)  │  │
-│  └──────────┘  └──────────┘  └───────────┘  │
-├─────────────────────────────────────────────┤
-│                   Handy                      │
-│  ┌──────────┐  ┌──────────┐  ┌───────────┐  │
-│  │ Audio    │  │ Transcrip│  │ LLM       │  │
-│  │ Pipeline │  │ tion     │  │ Client    │  │
-│  │ (cpal)   │  │ (whisper)│  │ (BYOK)    │  │
-│  └──────────┘  └──────────┘  └───────────┘  │
-│                 ┌──────────┐                 │
-│                 │ SQLite   │                 │
-│                 └──────────┘                 │
-└─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│                    handyXmutter                       │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐           │
+│  │ Journal   │  │ Video /  │  │ Meeting  │           │
+│  │ Manager   │  │ YouTube  │  │ Diarize  │           │
+│  │           │  │ (yt-dlp) │  │(pyannote)│           │
+│  └──────────┘  └──────────┘  └──────────┘           │
+│  ┌──────────┐  ┌──────────┐  ┌───────────┐          │
+│  │ Chat     │  │ Search   │  │ Folder    │          │
+│  │ Sessions │  │ (client) │  │ Chat      │          │
+│  └──────────┘  └──────────┘  └───────────┘          │
+├──────────────────────────────────────────────────────┤
+│                      Handy                            │
+│  ┌──────────┐  ┌──────────┐  ┌───────────┐          │
+│  │ Audio    │  │ Transcrip│  │ LLM       │          │
+│  │ Pipeline │  │ tion     │  │ Client    │          │
+│  │ (cpal)   │  │ (whisper)│  │ (BYOK)    │          │
+│  └──────────┘  └──────────┘  └───────────┘          │
+│                 ┌──────────┐                          │
+│                 │ SQLite   │                          │
+│                 └──────────┘                          │
+└──────────────────────────────────────────────────────┘
+
+Desktop-only modules (audio, transcription, diarization, overlay,
+tray, shortcuts) are gated with #[cfg] for Android compatibility.
 ```
+
+## Android Port (Work in Progress)
+
+The codebase compiles for Android (`aarch64-linux-android`) with desktop-only features gated at compile time. The Android build currently includes journal CRUD, folders, chat, history, LLM post-processing, and settings. Audio recording, transcription, and diarization are not yet available on Android.
+
+**Status**: Phase 1 complete (compiles). Phase 2 pending (mobile-responsive UI, Android audio backend).
 
 ## Direction
 
@@ -163,6 +190,7 @@ What we're exploring:
 - **AI as a thinking partner** — Not to write for you, but to help you think more clearly about what you already said.
 - **Local-first** — Your journal stays on your machine. Transcription runs offline. LLM calls are optional and configurable.
 - **Handy as a platform** — Demonstrating that Handy's architecture can support domain-specific tools beyond clipboard transcription.
+- **Mobile** — Bringing voice journaling to Android so you can mutter on the go.
 
 ## Syncing with Upstream
 

@@ -9,6 +9,7 @@ use std::fs;
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter, Manager};
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::audio_toolkit::save_wav_file;
 
 /// Database migrations for transcription history.
@@ -177,6 +178,7 @@ impl HistoryManager {
     }
 
     /// Save a transcription to history (both database and WAV file)
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub async fn save_transcription(
         &self,
         audio_samples: Vec<f32>,

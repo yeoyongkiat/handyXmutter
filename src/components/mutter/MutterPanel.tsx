@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { BookOpen, Video, Users, Settings } from "lucide-react";
+import { BookOpen, Globe, Users, Settings } from "lucide-react";
 import { JournalSettings } from "../settings/journal/JournalSettings";
 import { MutterSettings } from "./MutterSettings";
 import { useMutterStore, type MutterTab } from "@/stores/mutterStore";
@@ -12,7 +12,7 @@ const MUTTER_TABS = {
   },
   video: {
     labelKey: "mutter.tabs.video",
-    icon: Video,
+    icon: Globe,
   },
   meeting: {
     labelKey: "mutter.tabs.meeting",

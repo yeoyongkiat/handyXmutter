@@ -1,20 +1,25 @@
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod audio;
 pub mod history;
 pub mod journal;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod meeting;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod models;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod transcription;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod video;
 
 use crate::settings::{get_settings, write_settings, AppSettings, LogLevel};
-use crate::utils::cancel_current_operation;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_opener::OpenerExt;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 #[specta::specta]
 pub fn cancel_operation(app: AppHandle) {
-    cancel_current_operation(&app);
+    crate::utils::cancel_current_operation(&app);
 }
 
 #[tauri::command]
@@ -69,6 +74,7 @@ pub fn set_log_level(app: AppHandle, level: LogLevel) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[specta::specta]
 #[tauri::command]
 pub fn open_recordings_folder(app: AppHandle) -> Result<(), String> {
@@ -87,6 +93,7 @@ pub fn open_recordings_folder(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[specta::specta]
 #[tauri::command]
 pub fn open_log_dir(app: AppHandle) -> Result<(), String> {
@@ -103,6 +110,7 @@ pub fn open_log_dir(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[specta::specta]
 #[tauri::command]
 pub fn open_app_data_dir(app: AppHandle) -> Result<(), String> {
@@ -121,6 +129,7 @@ pub fn open_app_data_dir(app: AppHandle) -> Result<(), String> {
 
 /// Check if Apple Intelligence is available on this device.
 /// Called by the frontend when the user selects Apple Intelligence provider.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[specta::specta]
 #[tauri::command]
 pub fn check_apple_intelligence_available() -> bool {
@@ -136,6 +145,7 @@ pub fn check_apple_intelligence_available() -> bool {
 
 /// Try to initialize Enigo (keyboard/mouse simulation).
 /// On macOS, this will return an error if accessibility permissions are not granted.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[specta::specta]
 #[tauri::command]
 pub fn initialize_enigo(app: AppHandle) -> Result<(), String> {
@@ -169,11 +179,13 @@ pub fn initialize_enigo(app: AppHandle) -> Result<(), String> {
 }
 
 /// Marker state to track if shortcuts have been initialized.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub struct ShortcutsInitialized;
 
 /// Initialize keyboard shortcuts.
 /// On macOS, this should be called after accessibility permissions are granted.
 /// This is idempotent - calling it multiple times is safe.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[specta::specta]
 #[tauri::command]
 pub fn initialize_shortcuts(app: AppHandle) -> Result<(), String> {

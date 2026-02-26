@@ -1124,6 +1124,22 @@ async getMeetingSegments(entryId: number) : Promise<Result<DiarizedSegment[], st
     else return { status: "error", error: e  as any };
 }
 },
+async updateMeetingSegmentText(segmentId: number, text: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_meeting_segment_text", { segmentId, text }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async updateMeetingSegmentSpeaker(segmentId: number, speaker: number | null) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("update_meeting_segment_speaker", { segmentId, speaker }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async updateMeetingSpeakerName(entryId: number, speakerId: number, name: string) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("update_meeting_speaker_name", { entryId, speakerId, name }) };
@@ -1189,7 +1205,7 @@ export type CustomSounds = { start: boolean; stop: boolean }
 /**
  * A single diarized speech segment with speaker assignment and audio samples.
  */
-export type DiarizedSegment = { speaker: number | null; start_ms: number; end_ms: number; text: string }
+export type DiarizedSegment = { id?: number | null; speaker: number | null; start_ms: number; end_ms: number; text: string }
 export type EngineType = "Whisper" | "Parakeet" | "Moonshine" | "MoonshineStreaming" | "SenseVoice"
 export type HistoryEntry = { id: number; file_name: string; timestamp: number; saved: boolean; title: string; transcription_text: string; post_processed_text: string | null; post_process_prompt: string | null }
 /**

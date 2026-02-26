@@ -14,6 +14,8 @@ const EMBEDDING_URL: &str = "https://github.com/thewh1teagle/pyannote-rs/release
 /// A single diarized speech segment with speaker assignment and audio samples.
 #[derive(Clone, Debug, Serialize, Deserialize, Type)]
 pub struct DiarizedSegment {
+    #[serde(default)]
+    pub id: Option<i64>,
     pub speaker: Option<i32>,
     pub start_ms: i64,
     pub end_ms: i64,

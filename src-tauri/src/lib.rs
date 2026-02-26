@@ -1,24 +1,39 @@
+// Desktop-only modules — depend on cpal, enigo, rdev, rodio, etc.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod actions;
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 mod apple_intelligence;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod audio_feedback;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod audio_toolkit;
 pub mod cli;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod clipboard;
 mod commands;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod diarize;
 mod helpers;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod input;
 mod llm_client;
 mod managers;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod overlay;
 mod settings;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod shortcut;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod signal_handle;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod transcription_coordinator;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod tray;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod tray_i18n;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod utils;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod ytdlp;
 
 pub use cli::CliArgs;
@@ -26,10 +41,13 @@ use specta_typescript::{BigIntExportBehavior, Typescript};
 use tauri_specta::{collect_commands, Builder};
 
 use env_filter::Builder as EnvFilterBuilder;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use managers::audio::AudioRecordingManager;
 use managers::history::HistoryManager;
 use managers::journal::JournalManager;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use managers::model::ModelManager;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use managers::transcription::TranscriptionManager;
 #[cfg(unix)]
 use signal_hook::consts::{SIGUSR1, SIGUSR2};
@@ -37,11 +55,17 @@ use signal_hook::consts::{SIGUSR1, SIGUSR2};
 use signal_hook::iterator::Signals;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::image::Image;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub use transcription_coordinator::TranscriptionCoordinator;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Listener, Manager};
+use tauri::{AppHandle, Emitter, Manager};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use tauri::Listener;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_log::{Builder as LogBuilder, RotationStrategy, Target, TargetKind};
 
@@ -85,6 +109,7 @@ fn build_console_filter() -> env_filter::Filter {
     builder.build()
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn show_main_window(app: &AppHandle) {
     if let Some(main_window) = app.get_webview_window("main") {
         // First, ensure the window is visible
@@ -107,6 +132,7 @@ fn show_main_window(app: &AppHandle) {
     }
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn initialize_core_logic(app_handle: &AppHandle) {
     // Note: Enigo (keyboard/mouse simulation) is NOT initialized here.
     // The frontend is responsible for calling the `initialize_enigo` command
@@ -243,6 +269,18 @@ fn initialize_core_logic(app_handle: &AppHandle) {
     utils::create_recording_overlay(app_handle);
 }
 
+/// Mobile-specific initialization — only journal + history managers
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn initialize_core_logic_mobile(app_handle: &AppHandle) {
+    let history_manager =
+        Arc::new(HistoryManager::new(app_handle).expect("Failed to initialize history manager"));
+    let journal_manager =
+        Arc::new(JournalManager::new(app_handle).expect("Failed to initialize journal manager"));
+
+    app_handle.manage(history_manager);
+    app_handle.manage(journal_manager);
+}
+
 #[tauri::command]
 #[specta::specta]
 fn trigger_update_check(app: AppHandle) -> Result<(), String> {
@@ -255,12 +293,26 @@ fn trigger_update_check(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Desktop entry point — accepts CLI arguments
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn run(cli_args: CliArgs) {
+    run_inner(cli_args);
+}
+
+/// Mobile entry point — no CLI arguments
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::mobile_entry_point]
+pub fn run() {
+    run_inner(CliArgs::default());
+}
+
+fn run_inner(cli_args: CliArgs) {
     // Parse console logging directives from RUST_LOG, falling back to info-level logging
     // when the variable is unset
     let console_filter = build_console_filter();
 
+    // Desktop-only commands are collected separately and merged
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let specta_builder = Builder::<tauri::Wry>::new().commands(collect_commands![
         shortcut::change_binding,
         shortcut::reset_binding,
@@ -401,9 +453,56 @@ pub fn run(cli_args: CliArgs) {
         commands::meeting::save_meeting_entry,
         commands::meeting::transcribe_meeting,
         commands::meeting::get_meeting_segments,
+        commands::meeting::update_meeting_segment_text,
+        commands::meeting::update_meeting_segment_speaker,
         commands::meeting::update_meeting_speaker_name,
         commands::meeting::get_meeting_speaker_names,
         commands::meeting::diarize_entry,
+        helpers::clamshell::is_laptop,
+    ]);
+
+    // Mobile: only register platform-agnostic commands
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let specta_builder = Builder::<tauri::Wry>::new().commands(collect_commands![
+        trigger_update_check,
+        commands::get_app_dir_path,
+        commands::get_app_settings,
+        commands::get_default_settings,
+        commands::get_log_dir_path,
+        commands::set_log_level,
+        commands::journal::save_journal_entry,
+        commands::journal::get_journal_entries,
+        commands::journal::get_journal_entry,
+        commands::journal::update_journal_entry,
+        commands::journal::delete_journal_entry,
+        commands::journal::apply_journal_post_process,
+        commands::journal::apply_prompt_text_to_text,
+        commands::journal::update_journal_post_processed_text,
+        commands::journal::get_journal_audio_file_path,
+        commands::journal::apply_prompt_to_journal_entry,
+        commands::journal::apply_prompt_text_to_journal_entry,
+        commands::journal::undo_journal_prompt,
+        commands::journal::update_journal_transcription_text,
+        commands::journal::update_entry_after_processing,
+        commands::journal::journal_chat,
+        commands::journal::create_chat_session,
+        commands::journal::get_chat_sessions,
+        commands::journal::save_chat_message,
+        commands::journal::get_chat_messages,
+        commands::journal::update_chat_session_title,
+        commands::journal::delete_chat_session,
+        commands::journal::create_journal_folder,
+        commands::journal::rename_journal_folder,
+        commands::journal::delete_journal_folder,
+        commands::journal::get_journal_folders,
+        commands::journal::move_journal_entry_to_folder,
+        commands::journal::get_journal_storage_path,
+        commands::journal::set_journal_storage_path,
+        commands::history::get_history_entries,
+        commands::history::toggle_history_entry_saved,
+        commands::history::delete_history_entry,
+        commands::history::update_history_limit,
+        commands::history::update_recording_retention_period,
         helpers::clamshell::is_laptop,
     ]);
 
@@ -416,7 +515,6 @@ pub fn run(cli_args: CliArgs) {
         .expect("Failed to export typescript bindings");
 
     let mut builder = tauri::Builder::default()
-        .device_event_filter(tauri::DeviceEventFilter::Always)
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             LogBuilder::new()
@@ -442,35 +540,54 @@ pub fn run(cli_args: CliArgs) {
                 .build(),
         );
 
+    // Desktop-only: device event filter (not available on mobile)
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        builder = builder.device_event_filter(tauri::DeviceEventFilter::Always);
+    }
+
     #[cfg(target_os = "macos")]
     {
         builder = builder.plugin(tauri_nspanel::init());
     }
 
-    builder
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            if args.iter().any(|a| a == "--toggle-transcription") {
-                signal_handle::send_transcription_input(app, "transcribe", "CLI");
-            } else if args.iter().any(|a| a == "--toggle-post-process") {
-                signal_handle::send_transcription_input(app, "transcribe_with_post_process", "CLI");
-            } else if args.iter().any(|a| a == "--cancel") {
-                crate::utils::cancel_current_operation(app);
-            } else {
-                show_main_window(app);
-            }
-        }))
+    // Desktop-only plugins
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        builder = builder
+            .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+                if args.iter().any(|a| a == "--toggle-transcription") {
+                    signal_handle::send_transcription_input(app, "transcribe", "CLI");
+                } else if args.iter().any(|a| a == "--toggle-post-process") {
+                    signal_handle::send_transcription_input(
+                        app,
+                        "transcribe_with_post_process",
+                        "CLI",
+                    );
+                } else if args.iter().any(|a| a == "--cancel") {
+                    crate::utils::cancel_current_operation(app);
+                } else {
+                    show_main_window(app);
+                }
+            }))
+            .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+            .plugin(tauri_plugin_autostart::init(
+                MacosLauncher::LaunchAgent,
+                Some(vec![]),
+            ))
+            .plugin(tauri_plugin_macos_permissions::init());
+    }
+
+    // Cross-platform plugins
+    builder = builder
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_macos_permissions::init())
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_autostart::init(
-            MacosLauncher::LaunchAgent,
-            Some(vec![]),
-        ))
+        .plugin(tauri_plugin_store::Builder::default().build());
+
+    builder
         .manage(cli_args.clone())
         .setup(move |app| {
             let mut settings = get_settings(&app.handle());
@@ -486,52 +603,71 @@ pub fn run(cli_args: CliArgs) {
             // Store the file log level in the atomic for the filter to use
             FILE_LOG_LEVEL.store(file_log_level.to_level_filter() as u8, Ordering::Relaxed);
             let app_handle = app.handle().clone();
-            app.manage(TranscriptionCoordinator::new(app_handle.clone()));
 
-            initialize_core_logic(&app_handle);
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            {
+                app.manage(TranscriptionCoordinator::new(app_handle.clone()));
+                initialize_core_logic(&app_handle);
 
-            // Hide tray icon if --no-tray was passed
-            if cli_args.no_tray {
-                tray::set_tray_visibility(&app_handle, false);
+                // Hide tray icon if --no-tray was passed
+                if cli_args.no_tray {
+                    tray::set_tray_visibility(&app_handle, false);
+                }
+
+                // Show main window only if not starting hidden
+                // CLI --start-hidden flag overrides the setting
+                let should_hide = settings.start_hidden || cli_args.start_hidden;
+                if !should_hide {
+                    if let Some(main_window) = app_handle.get_webview_window("main") {
+                        main_window.show().unwrap();
+                        main_window.set_focus().unwrap();
+                    }
+                }
             }
 
-            // Show main window only if not starting hidden
-            // CLI --start-hidden flag overrides the setting
-            let should_hide = settings.start_hidden || cli_args.start_hidden;
-            if !should_hide {
-                if let Some(main_window) = app_handle.get_webview_window("main") {
-                    main_window.show().unwrap();
-                    main_window.set_focus().unwrap();
-                }
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                initialize_core_logic_mobile(&app_handle);
             }
 
             Ok(())
         })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
-                let settings = get_settings(&window.app_handle());
-                let cli = window.app_handle().state::<CliArgs>();
-                // If tray icon is hidden (via setting or --no-tray flag), quit the app
-                if !settings.show_tray_icon || cli.no_tray {
-                    window.app_handle().exit(0);
-                    return;
-                }
-                api.prevent_close();
-                let _res = window.hide();
-                #[cfg(target_os = "macos")]
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 {
-                    let res = window
-                        .app_handle()
-                        .set_activation_policy(tauri::ActivationPolicy::Accessory);
-                    if let Err(e) = res {
-                        log::error!("Failed to set activation policy: {}", e);
+                    let settings = get_settings(&window.app_handle());
+                    let cli = window.app_handle().state::<CliArgs>();
+                    // If tray icon is hidden (via setting or --no-tray flag), quit the app
+                    if !settings.show_tray_icon || cli.no_tray {
+                        window.app_handle().exit(0);
+                        return;
                     }
+                    api.prevent_close();
+                    let _res = window.hide();
+                    #[cfg(target_os = "macos")]
+                    {
+                        let res = window
+                            .app_handle()
+                            .set_activation_policy(tauri::ActivationPolicy::Accessory);
+                        if let Err(e) = res {
+                            log::error!("Failed to set activation policy: {}", e);
+                        }
+                    }
+                }
+                // On mobile, default close behavior (no tray to hide to)
+                #[cfg(any(target_os = "android", target_os = "ios"))]
+                {
+                    let _ = (window, api); // suppress unused warnings
                 }
             }
             tauri::WindowEvent::ThemeChanged(theme) => {
                 log::info!("Theme changed to: {:?}", theme);
-                // Update tray icon to match new theme, maintaining idle state
-                utils::change_tray_icon(&window.app_handle(), utils::TrayIconState::Idle);
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                {
+                    // Update tray icon to match new theme, maintaining idle state
+                    utils::change_tray_icon(&window.app_handle(), utils::TrayIconState::Idle);
+                }
             }
             _ => {}
         })

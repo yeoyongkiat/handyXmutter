@@ -454,6 +454,8 @@
       "retranscribe": "Re-transcribe",
       "retranscribing": "Re-transcribing...",
       "diarize": "Diarize",
+      "showSpeakers": "Show speakers",
+      "showTranscript": "Show transcript",
       "userSource": "Source",
       "userSourcePlaceholder": "e.g. interview, podcast, lecture...",
       "applyingPrompt": "Applying...",
@@ -505,7 +507,7 @@
         "entryCount_one": "{{count}} entry",
         "entryCount_other": "{{count}} entries",
         "emptyFolder": "No entries yet. Record your first voice note!",
-        "emptyFolderVideo": "No entries yet. Import your first video!",
+        "emptyFolderVideo": "No entries yet. Import your first URL!",
         "emptyFolderMeeting": "No entries yet. Record your first meeting!"
       }
     },
@@ -529,8 +531,15 @@
       "expectedSpeakers": "Speakers",
       "threshold": "Threshold",
       "reDiarize": "Re-diarize",
+      "enableDiarize": "Speaker identification",
+      "enableDiarizeDesc": "Identify and label different speakers",
+      "configureDiarize": "Speaker Diarization",
+      "configureDiarizeDesc": "Set the expected number of speakers and similarity threshold before processing",
+      "thresholdHelp": "Speakers sets a hard cap on distinct voices. Threshold fine-tunes how different a voice must sound to count as a new speaker (only matters below the cap). Lower = splits voices more aggressively, higher = merges similar voices. Default 0.50 works well in most cases.",
+      "startDiarize": "Start Processing",
       "speakersDetected": "{{count}} speakers detected",
       "renameSpeaker": "Rename speaker",
+      "reassignSpeaker": "Change speaker",
       "processing": "Processing meeting audio...",
       "diarizing": "Identifying speakers...",
       "transcribingSegment": "Transcribing segment {{current}} of {{total}}...",
@@ -710,7 +719,7 @@
   "mutter": {
     "tabs": {
       "journal": "Journal",
-      "video": "Video",
+      "video": "URL",
       "meeting": "Meetings"
     },
     "settings": {

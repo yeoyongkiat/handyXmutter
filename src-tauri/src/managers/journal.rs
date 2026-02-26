@@ -761,6 +761,28 @@ impl JournalManager {
         self.get_entries_by_source(None).await
     }
 
+    pub async fn get_entries_by_sources(
+        &self,
+        sources: &[&str],
+    ) -> Result<Vec<JournalEntry>> {
+        let conn = self.get_connection()?;
+        let mut entries = Vec::new();
+
+        let placeholders: Vec<String> = (1..=sources.len()).map(|i| format!("?{}", i)).collect();
+        let sql = format!(
+            "SELECT id, file_name, timestamp, title, transcription_text, post_processed_text, post_process_prompt_id, tags, linked_entry_ids, folder_id, transcript_snapshots, source, source_url, speaker_names, user_source FROM journal_entries WHERE source IN ({}) ORDER BY timestamp DESC",
+            placeholders.join(", ")
+        );
+        let mut stmt = conn.prepare(&sql)?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = sources.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+        let rows = stmt.query_map(params.as_slice(), |row| Self::parse_entry_row(row))?;
+        for row in rows {
+            entries.push(row?);
+        }
+
+        Ok(entries)
+    }
+
     pub async fn get_entries_by_source(
         &self,
         source_filter: Option<&str>,
@@ -1482,6 +1504,7 @@ impl JournalManager {
 
     // --- Meeting segment operations ---
 
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub async fn save_meeting_segments(
         &self,
         entry_id: i64,
@@ -1510,20 +1533,22 @@ impl JournalManager {
         Ok(())
     }
 
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub async fn get_meeting_segments(
         &self,
         entry_id: i64,
     ) -> Result<Vec<crate::diarize::DiarizedSegment>> {
         let conn = self.get_connection()?;
         let mut stmt = conn.prepare(
-            "SELECT speaker, start_ms, end_ms, text FROM meeting_segments WHERE entry_id = ?1 ORDER BY start_ms ASC",
+            "SELECT id, speaker, start_ms, end_ms, text FROM meeting_segments WHERE entry_id = ?1 ORDER BY start_ms ASC",
         )?;
         let rows = stmt.query_map([entry_id], |row| {
             Ok(crate::diarize::DiarizedSegment {
-                speaker: row.get(0)?,
-                start_ms: row.get(1)?,
-                end_ms: row.get(2)?,
-                text: row.get(3)?,
+                id: Some(row.get(0)?),
+                speaker: row.get(1)?,
+                start_ms: row.get(2)?,
+                end_ms: row.get(3)?,
+                text: row.get(4)?,
             })
         })?;
         let mut segments = Vec::new();
@@ -1531,6 +1556,34 @@ impl JournalManager {
             segments.push(row?);
         }
         Ok(segments)
+    }
+
+    pub async fn update_segment_text(
+        &self,
+        segment_id: i64,
+        text: String,
+    ) -> Result<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "UPDATE meeting_segments SET text = ?1 WHERE id = ?2",
+            params![text, segment_id],
+        )?;
+        debug!("Updated text for segment {}", segment_id);
+        Ok(())
+    }
+
+    pub async fn update_segment_speaker(
+        &self,
+        segment_id: i64,
+        speaker: Option<i32>,
+    ) -> Result<()> {
+        let conn = self.get_connection()?;
+        conn.execute(
+            "UPDATE meeting_segments SET speaker = ?1 WHERE id = ?2",
+            params![speaker, segment_id],
+        )?;
+        debug!("Updated speaker for segment {} to {:?}", segment_id, speaker);
+        Ok(())
     }
 
     pub async fn update_speaker_name(
