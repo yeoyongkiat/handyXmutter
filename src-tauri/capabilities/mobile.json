@@ -6,6 +6,17 @@
     "clipboard-manager:default",
     "dialog:default",
     "fs:default",
+    "fs:allow-appdata-write-recursive",
+    "fs:allow-appdata-read-recursive",
+    "fs:read-files",
+    "fs:write-files",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$APPDATA" },
+        { "path": "$APPDATA/**/*" }
+      ]
+    },
     "opener:default",
     "os:default",
     "process:default",
