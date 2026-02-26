@@ -44,7 +44,7 @@ curl -o src-tauri/resources/models/silero_vad_v4.onnx https://blob.handy.compute
 
 ## Architecture Overview
 
-Handy is a cross-platform speech-to-text app built with Tauri 2.x (Rust backend + React/TypeScript frontend). Desktop (macOS/Windows/Linux) is fully functional. Android support is in progress — Phases 1-3 complete (compiles, launches, mobile-responsive UI), Phase 4 partially done (model download works on Android, audio recording backend pending).
+Handy is a cross-platform speech-to-text app built with Tauri 2.x (Rust backend + React/TypeScript frontend). Desktop (macOS/Windows/Linux) is fully functional. Android Phases 1-4 complete — compiles, launches, mobile-responsive UI, audio recording via WebView, cloud transcription, share intents.
 
 ### Backend Structure (src-tauri/src/)
 
@@ -63,6 +63,8 @@ Handy is a cross-platform speech-to-text app built with Tauri 2.x (Rust backend 
   - `video.rs` - Video feature commands (yt-dlp management, YouTube audio download, video import, source-filtered CRUD)
   - `meeting.rs` - Meeting/diarization commands (model management, diarized transcription, source-filtered CRUD, speaker names)
 - `diarize.rs` - Speaker diarization via pyannote-rs (ONNX model download, segmentation, embedding, speaker assignment)
+- `audio_save.rs` - Cross-platform WAV saving (16kHz mono f32 PCM → WAV via hound crate); used by both desktop audio_toolkit and mobile recording
+- `cloud_transcribe.rs` - Mobile-only cloud transcription via Whisper API (`/v1/audio/transcriptions`); uses user's configured post-processing provider
 - `ytdlp.rs` - yt-dlp binary management (download/install binary, download audio, fetch video title via `tokio::process::Command`)
 - `shortcut.rs` - Global keyboard shortcut handling
 - `settings.rs` - Application settings management
@@ -80,6 +82,7 @@ Handy is a cross-platform speech-to-text app built with Tauri 2.x (Rust backend 
 - `components/model-selector/` - Model management interface
 - `components/onboarding/` - First-run experience
 - `hooks/useSettings.ts`, `useModels.ts` - State management hooks
+- `hooks/useAudioRecorder.ts` - Mobile-only WebView audio recording (getUserMedia + AudioContext + ScriptProcessorNode, 16kHz mono)
 - `stores/settingsStore.ts` - Zustand store for settings
 - `stores/mutterStore.ts` - Zustand store for journal cross-component state
 - `lib/journal.ts` - Types, default prompts, command wrappers
@@ -310,16 +313,16 @@ Binary paths (needed when shell profile isn't loaded, e.g., in Claude Code):
 
 ## Platform Notes
 
-- **macOS**: Metal acceleration, accessibility permissions required
+- **macOS**: Metal acceleration, accessibility permissions required. App is ad-hoc signed (`Signature=adhoc`). After rebuilding/reinstalling the DMG, macOS accessibility permissions become stale because the code signature changes. Fix: run `tccutil reset Accessibility` in Terminal, quit the app, relaunch, then re-add via the **+** button in System Settings > Accessibility (don't toggle an existing stale entry)
 - **Windows**: Vulkan acceleration, code signing
 - **Linux**: OpenBLAS + Vulkan, limited Wayland support, overlay disabled by default
 - **Android**: In progress — see [Android Port](#android-port) section below
 
 ## Android Port
 
-### Status: Phases 1-3 Complete, Phase 4 In Progress
+### Status: Phases 1-4 Complete
 
-The app compiles for `aarch64-linux-android`, launches on the Android emulator, and displays a mobile-responsive UI. Model download works on Android. Desktop-only features (audio recording, transcription, diarization, global shortcuts, tray, overlay) are gated at compile time. The Android build currently supports: journal CRUD, folders, chat, history, LLM post-processing, settings, and model management.
+The app compiles for `aarch64-linux-android`, launches on the Android emulator, and displays a mobile-responsive UI. Audio recording works via WebView Web Audio API. Cloud transcription via Whisper-compatible API (BYOK). Share intent handling implemented.
 
 **What works on Android today:**
 - App launches and renders the model selection onboarding
@@ -327,14 +330,17 @@ The app compiles for `aarch64-linux-android`, launches on the Android emulator, 
 - Journal entry CRUD, folders, chat sessions, post-processing
 - History entries, settings read/write
 - Mobile-responsive sidebar (drawer pattern), touch events, viewport units
+- Audio recording via WebView `getUserMedia()` + `AudioContext` + `ScriptProcessorNode` (16kHz mono)
+- Runtime RECORD_AUDIO permission request (triggered by getUserMedia → RustWebChromeClient.kt)
+- Cloud transcription via Whisper API (`/v1/audio/transcriptions`) using user's configured provider
+- Share intent handling (text/audio/video via Kotlin MainActivity → JSON file → Rust commands)
+- Android foreground service skeleton for recording (AudioRecordingService.kt)
 
 **What does NOT work on Android yet:**
-- Audio recording (no Android audio backend — needs oboe-rs or Tauri mobile plugin)
-- Transcription (TranscriptionManager gated — depends on transcribe-rs/ort ONNX)
+- Native ONNX transcription (TranscriptionManager gated — depends on transcribe-rs/ort)
 - Video/YouTube download (yt-dlp subprocess execution not supported on Android)
 - Meeting/diarization (pyannote-rs gated)
-- Share intent handling (manifest filters declared but no Kotlin handler code)
-- Runtime permission request UI for RECORD_AUDIO (manifest declares permission, no runtime prompt)
+- Foreground service JNI bridge (service exists but not wired to Rust via Tauri mobile plugin)
 
 ### Platform Conditional Compilation
 
@@ -347,7 +353,9 @@ Desktop-only code is gated with `#[cfg(not(any(target_os = "android", target_os 
 
 **Cross-platform command modules**: `journal`, `history`, `models` (models has platform-conditional variants for commands that depend on TranscriptionManager)
 
-**Gated commands in journal.rs**: `start_journal_recording`, `stop_journal_recording`, `get_partial_journal_transcription`, `retranscribe_journal_entry`, `import_audio_for_journal`
+**Platform-conditional commands in journal.rs**: `start_journal_recording`, `stop_journal_recording`, `get_partial_journal_transcription`, `import_audio_for_journal` — desktop versions use AudioRecordingManager/TranscriptionManager; mobile versions use WebView audio (raw f32 file) + cloud transcription via `cloud_transcribe.rs`
+
+**Mobile-only command module**: `commands/share.rs` — `get_pending_share`, `clear_pending_share` (reads JSON written by Kotlin MainActivity)
 
 **Platform-conditional model commands** (in `commands/models.rs`):
 - `delete_model`, `set_active_model` — desktop version uses TranscriptionManager to unload/load; mobile version just updates settings
@@ -470,7 +478,7 @@ Mobile audio recording uses the **WebView Web Audio API** instead of native cpal
 
 - `default.json` — Cross-platform permissions (fs, store, dialog, opener, clipboard, log, os, process, shell)
 - `desktop.json` — Desktop-only: `global-shortcut:*`, `macos-permissions:default`, `recording_overlay` window. Platforms: `["macOS", "windows", "linux"]`
-- `mobile.json` — Mobile: `clipboard-manager:default`, `dialog:default`, `fs:default`, `opener:default`, `os:default`, `process:default`, `store:default`. Platforms: `["android", "iOS"]`
+- `mobile.json` — Mobile: `clipboard-manager:default`, `dialog:default`, `fs:default`, `fs:allow-appdata-write-recursive`, `fs:allow-appdata-read-recursive`, `fs:read-files`, `fs:write-files`, `fs:scope` (APPDATA), `opener:default`, `os:default`, `process:default`, `store:default`. Platforms: `["android", "iOS"]`
 
 ### Android Development Setup
 
