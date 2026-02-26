@@ -863,19 +863,16 @@ pub fn get_bindings(app: &AppHandle) -> HashMap<String, ShortcutBinding> {
 pub fn get_stored_binding(app: &AppHandle, id: &str) -> ShortcutBinding {
     let bindings = get_bindings(app);
 
-    bindings
-        .get(id)
-        .cloned()
-        .unwrap_or_else(|| {
-            warn!("Binding '{}' not found, returning empty binding", id);
-            ShortcutBinding {
-                id: id.to_string(),
-                name: String::new(),
-                description: String::new(),
-                default_binding: String::new(),
-                current_binding: String::new(),
-            }
-        })
+    bindings.get(id).cloned().unwrap_or_else(|| {
+        warn!("Binding '{}' not found, returning empty binding", id);
+        ShortcutBinding {
+            id: id.to_string(),
+            name: String::new(),
+            description: String::new(),
+            default_binding: String::new(),
+            current_binding: String::new(),
+        }
+    })
 }
 
 pub fn get_history_limit(app: &AppHandle) -> usize {

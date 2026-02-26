@@ -423,19 +423,46 @@ pub fn run(cli_args: CliArgs) { run_inner(cli_args); }
 pub fn run() { run_inner(CliArgs::default()); }
 ```
 
-**Mobile command set** (registered in `collect_commands!` for mobile): journal CRUD (28 commands minus 5 recording/transcription), folders, chat, history, settings, model management (11 commands). Desktop has the full set including audio, video, meeting, transcription, shortcuts.
+**Mobile command set** (registered in `collect_commands!` for mobile): journal CRUD (28 commands including recording + import), folders, chat, history, settings, model management (11 commands), share intent (2 commands). Desktop has the full set including native audio, video, meeting, transcription, shortcuts.
 
 **Mobile init** (`initialize_core_logic_mobile`): Creates `HistoryManager`, `JournalManager`, and `ModelManager`. Desktop additionally creates `AudioRecordingManager`, `TranscriptionManager`, `TranscriptionCoordinator`.
+
+### Android Audio Recording
+
+Mobile audio recording uses the **WebView Web Audio API** instead of native cpal:
+- `src/hooks/useAudioRecorder.ts` — Records via `getUserMedia` + `AudioContext` + `ScriptProcessorNode`
+- Captures 16kHz mono f32 PCM samples, writes raw bytes to temp file via Tauri FS API
+- Backend reads temp file, saves as WAV, attempts cloud transcription via Whisper API
+- `handleStartRecording` in JournalSettings checks `isMobile` and uses WebView recorder
+
+**Mobile recording commands** (in `commands/journal.rs`, `#[cfg(any(target_os = "android", target_os = "ios"))]`):
+- `start_journal_recording` — No-op; frontend manages audio capture
+- `stop_journal_recording(audio_file_path)` — Reads raw f32 temp file, saves WAV, tries cloud transcription
+- `get_partial_journal_transcription` — Returns empty string (no live transcription on mobile)
+- `import_audio_for_journal(file_path)` — Copies audio file to recordings dir
+
+**Cloud transcription** (`src-tauri/src/cloud_transcribe.rs`):
+- Uses user's configured post-processing API provider (OpenAI, Groq, etc.)
+- Sends WAV to `/v1/audio/transcriptions` endpoint (Whisper API format)
+- Falls back gracefully to empty transcription if no API key configured
 
 ### Android Manifest & Permissions
 
 `src-tauri/gen/android/app/src/main/AndroidManifest.xml` declares:
 - `INTERNET`, `ACCESS_NETWORK_STATE` — network access for model download + LLM API
-- `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS` — for future audio recording
-- `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MICROPHONE` — for future background recording
+- `RECORD_AUDIO`, `MODIFY_AUDIO_SETTINGS` — for audio recording
+- `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MICROPHONE` — for background recording
 - `POST_NOTIFICATIONS` — for recording indicator notification
 
-Share intent filters declared for `text/plain`, `audio/*`, `video/*` — but no Kotlin handler code yet.
+**AudioRecordingService** registered in manifest for foreground service during recording.
+
+### Share Intent Handler
+
+`MainActivity.kt` handles `ACTION_SEND` intents for `text/plain`, `audio/*`, `video/*`:
+- Text shares stored as JSON in `filesDir/pending_share.json`
+- Audio/video files copied from content:// URIs to app cache, path stored in JSON
+- Rust commands `get_pending_share` / `clear_pending_share` let frontend poll for pending shares
+- Frontend checks on mount in `App.tsx` and navigates to mutter section
 
 `RustWebChromeClient.kt` (Tauri-generated) auto-handles WebView-level `AUDIO_CAPTURE` permission requests.
 
@@ -483,39 +510,25 @@ NDK linker paths configured in `.cargo/config.toml` for all 4 Android targets (a
 
 `build.rs` runs on the **host** machine, not the target. Use `CARGO_CFG_TARGET_OS` / `CARGO_CFG_TARGET_ARCH` env vars (not `#[cfg]` attributes) to check the compilation target. The Apple Intelligence bridge build is gated this way.
 
-### Phase 4 Remaining Work (Android-Specific Features)
+### Phase 4 Completed Work
 
-**Foreground service for audio recording** (CRITICAL for recording to work):
-1. Create `AudioRecordingService.kt` in `src-tauri/gen/android/app/src/main/java/com/handyxmutter/journal/`
-2. Declare `<service android:name=".AudioRecordingService" android:foregroundServiceType="microphone" />` in AndroidManifest.xml
-3. Create notification channel for recording indicator
-4. Implement Rust↔Android bridge via Tauri mobile plugin or JNI
+**Runtime permission request** (Item 1): Uses WebView's `getUserMedia()` API — triggers Android's permission dialog through `RustWebChromeClient.kt` which already handles `AUDIO_CAPTURE`. Permission check integrated into `handleStartRecording()` on mobile via `mobileRecorder.requestPermission()`.
 
-**Android audio recording backend**:
-- Desktop uses `cpal` (CoreAudio/WASAPI/ALSA) — zero Android support
-- Options: `oboe-rs` (Android high-perf audio) behind `#[cfg(target_os = "android")]`, or Tauri mobile plugin bridge to Android MediaRecorder API
-- Implement `AudioBackend` trait with desktop (cpal) and Android (oboe/MediaRecorder) implementations
-- Wire up to existing `AudioRecordingManager` pattern
+**Audio recording backend** (Item 2): WebView Web Audio API approach — `useAudioRecorder` hook captures 16kHz mono f32 PCM via `AudioContext` + `ScriptProcessorNode`. Raw samples written to temp file, passed to Rust backend which saves as WAV.
 
-**ONNX transcription on Android**:
-- `ort 2.0.0-rc.10` has theoretical Android support (NNAPI backend)
-- Test with tiny Whisper model (~40MB) on emulator
-- Pre-bundle tiny model in APK or download on first launch
-- Models are 100MB-1.5GB — need download-on-demand with progress
+**Foreground service** (Item 3): `AudioRecordingService.kt` created with notification channel and start/stop actions. Registered in AndroidManifest. Currently needs JNI bridge from Rust to start/stop (deferred — recording works fine when app is in foreground).
 
-**Share intent handler**:
-- `AndroidManifest.xml` already has intent filters for text/audio/video
-- Need Kotlin code in `MainActivity.kt` to handle `ACTION_SEND` intents
-- Bridge received data to frontend via Tauri event (`share-received`)
+**Share intent handler** (Item 4): `MainActivity.kt` handles `ACTION_SEND` for text/audio/video. Writes JSON to `filesDir/pending_share.json`. Rust commands `get_pending_share`/`clear_pending_share` exposed to frontend. `App.tsx` polls on mount.
 
-**Runtime permission request UI**:
-- `RECORD_AUDIO` declared in manifest but no runtime prompt
-- Android 6.0+ requires runtime permission request before first use
-- Add permission check/request flow in frontend before recording starts
+**Cloud transcription** (Item 5): `cloud_transcribe.rs` sends WAV to user's configured API provider via Whisper API format (`/v1/audio/transcriptions`). Integrated into mobile `stop_journal_recording` — gracefully falls back to empty transcription if no API key.
 
-### Android Port Plan Reference
+### Phase 4 Remaining Work (Future Enhancements)
 
-Full audit and phased plan at: `.claude/plans/lucky-juggling-cookie.md`
+**Foreground service JNI bridge**: `AudioRecordingService` is registered but not started/stopped from Rust during recording. Need Tauri mobile plugin or JNI calls in recording commands to start/stop the service for background recording support.
+
+**Native ONNX transcription**: `ort 2.0.0-rc.10` has theoretical Android support (NNAPI). Moving `transcribe-rs` to cross-platform deps and testing on Android could enable offline transcription. Current approach uses cloud transcription as fallback.
+
+**Share intent processing**: Frontend currently only navigates to mutter section on share. Need full processing — auto-create entries from shared text, import shared audio/video files.
 
 ### Android Gotchas
 

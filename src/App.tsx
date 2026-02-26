@@ -65,6 +65,21 @@ function App() {
         refreshAudioDevices();
         refreshOutputDevices();
       }
+      // Mobile: check for pending share intent
+      if (isMobile) {
+        import("@tauri-apps/api/core").then(({ invoke }) => {
+          invoke<{ type: string; text?: string; subject?: string; file_path?: string } | null>(
+            "get_pending_share"
+          ).then((shareData) => {
+            if (shareData) {
+              console.log("Received share intent:", shareData);
+              invoke("clear_pending_share").catch(() => {});
+              // Switch to mutter section to handle the shared content
+              setCurrentSection("mutter");
+            }
+          }).catch(() => {});
+        });
+      }
     }
   }, [onboardingStep, refreshAudioDevices, refreshOutputDevices]);
 

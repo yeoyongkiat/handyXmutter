@@ -49,7 +49,8 @@ import {
   type JournalFolder,
 } from "@/lib/journal";
 import { useMutterStore } from "@/stores/mutterStore";
-import { isDesktop } from "@/lib/platform";
+import { isDesktop, isMobile } from "@/lib/platform";
+import { useAudioRecorder } from "@/hooks/useAudioRecorder";
 import {
   type ViewMode,
   type EntrySource,
@@ -148,6 +149,9 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
   const [view, setView] = useState<ViewMode>({ mode: "loading" });
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [folders, setFolders] = useState<JournalFolder[]>([]);
+
+  // Mobile audio recorder (WebView-based; desktop uses native Rust recording)
+  const mobileRecorder = useAudioRecorder();
 
   // Select the right commands based on source
   const cmds = source === "video" ? videoCommands : source === "meeting" ? meetingCommands : journalCommands;
@@ -264,9 +268,24 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
 
   const handleStartRecording = async (folderId: number) => {
     try {
-      // Clear any stale recording state before starting
-      try { await journalCommands.stopRecording(); } catch { /* no prior recording, that's fine */ }
-      await journalCommands.startRecording();
+      if (isMobile) {
+        // Mobile: request permission and start WebView audio capture
+        const hasPermission = await mobileRecorder.requestPermission();
+        if (!hasPermission) {
+          toast.error(t("settings.journal.micPermissionDenied"));
+          return;
+        }
+        await journalCommands.startRecording(); // State tracking on backend
+        const started = await mobileRecorder.start();
+        if (!started) {
+          toast.error(t("settings.journal.recordingFailed"));
+          return;
+        }
+      } else {
+        // Desktop: Rust manages audio capture natively via cpal
+        try { await journalCommands.stopRecording(); } catch { /* no prior recording, that's fine */ }
+        await journalCommands.startRecording();
+      }
       setView({ mode: "recording", folderId });
     } catch (error) {
       console.error("Failed to start recording:", error);
@@ -326,7 +345,19 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
 
   const handleStopRecording = async (folderId: number) => {
     try {
-      const result = await journalCommands.stopRecording();
+      let result;
+      if (isMobile) {
+        // Mobile: stop WebView recording, get temp file path, send to backend
+        const audioPath = await mobileRecorder.stop();
+        if (!audioPath) {
+          toast.error(t("settings.journal.recordingFailed"));
+          setView({ mode: "folder", folderId });
+          return;
+        }
+        result = await journalCommands.stopRecording(audioPath);
+      } else {
+        result = await journalCommands.stopRecording();
+      }
       // Auto-save entry and go straight to detail view
       const title = new Date().toLocaleDateString(undefined, {
         year: "numeric",
@@ -361,6 +392,9 @@ export const JournalSettings: React.FC<JournalSettingsProps> = ({
   };
 
   const handleCancelRecording = (folderId: number) => {
+    if (isMobile) {
+      mobileRecorder.cancel();
+    }
     journalCommands.stopRecording().catch(() => {});
     setView({ mode: "folder", folderId });
   };

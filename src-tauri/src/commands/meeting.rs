@@ -187,7 +187,14 @@ pub async fn transcribe_meeting(
     let seg_model = diarize::get_seg_model_path(&app)?;
     let emb_model = diarize::get_emb_model_path(&app)?;
 
-    let raw_segments = diarize::diarize_audio(&samples, target_rate, &seg_model, &emb_model, max_speakers, threshold)?;
+    let raw_segments = diarize::diarize_audio(
+        &samples,
+        target_rate,
+        &seg_model,
+        &emb_model,
+        max_speakers,
+        threshold,
+    )?;
 
     if raw_segments.is_empty() {
         warn!("[meeting] No speech segments found in audio");
@@ -307,10 +314,7 @@ pub async fn diarize_entry(
 ) -> Result<(), String> {
     let max_speakers = max_speakers.unwrap_or(6);
     let threshold = threshold.unwrap_or(0.5);
-    info!(
-        "[diarize] Starting diarization for entry {}",
-        entry_id
-    );
+    info!("[diarize] Starting diarization for entry {}", entry_id);
 
     let entry = journal_manager
         .get_entry_by_id(entry_id)
@@ -385,12 +389,20 @@ pub async fn diarize_entry(
     let seg_model = diarize::get_seg_model_path(&app)?;
     let emb_model = diarize::get_emb_model_path(&app)?;
 
-    let raw_segments = diarize::diarize_audio(&samples, target_rate, &seg_model, &emb_model, max_speakers, threshold)?;
+    let raw_segments = diarize::diarize_audio(
+        &samples,
+        target_rate,
+        &seg_model,
+        &emb_model,
+        max_speakers,
+        threshold,
+    )?;
 
     if raw_segments.is_empty() {
         warn!(
             "[diarize] No speech segments found for entry {} (audio file: {})",
-            entry_id, file_path.display()
+            entry_id,
+            file_path.display()
         );
         let _ = app.emit(
             "diarize-status",

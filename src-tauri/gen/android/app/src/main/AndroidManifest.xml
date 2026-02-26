@@ -43,6 +43,11 @@
             </intent-filter>
         </activity>
 
+        <service
+            android:name=".AudioRecordingService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
         <provider
           android:name="androidx.core.content.FileProvider"
           android:authorities="${applicationId}.fileprovider"

@@ -761,10 +761,7 @@ impl JournalManager {
         self.get_entries_by_source(None).await
     }
 
-    pub async fn get_entries_by_sources(
-        &self,
-        sources: &[&str],
-    ) -> Result<Vec<JournalEntry>> {
+    pub async fn get_entries_by_sources(&self, sources: &[&str]) -> Result<Vec<JournalEntry>> {
         let conn = self.get_connection()?;
         let mut entries = Vec::new();
 
@@ -774,7 +771,10 @@ impl JournalManager {
             placeholders.join(", ")
         );
         let mut stmt = conn.prepare(&sql)?;
-        let params: Vec<&dyn rusqlite::types::ToSql> = sources.iter().map(|s| s as &dyn rusqlite::types::ToSql).collect();
+        let params: Vec<&dyn rusqlite::types::ToSql> = sources
+            .iter()
+            .map(|s| s as &dyn rusqlite::types::ToSql)
+            .collect();
         let rows = stmt.query_map(params.as_slice(), |row| Self::parse_entry_row(row))?;
         for row in rows {
             entries.push(row?);
@@ -1558,11 +1558,7 @@ impl JournalManager {
         Ok(segments)
     }
 
-    pub async fn update_segment_text(
-        &self,
-        segment_id: i64,
-        text: String,
-    ) -> Result<()> {
+    pub async fn update_segment_text(&self, segment_id: i64, text: String) -> Result<()> {
         let conn = self.get_connection()?;
         conn.execute(
             "UPDATE meeting_segments SET text = ?1 WHERE id = ?2",
@@ -1582,7 +1578,10 @@ impl JournalManager {
             "UPDATE meeting_segments SET speaker = ?1 WHERE id = ?2",
             params![speaker, segment_id],
         )?;
-        debug!("Updated speaker for segment {} to {:?}", segment_id, speaker);
+        debug!(
+            "Updated speaker for segment {} to {:?}",
+            segment_id, speaker
+        );
         Ok(())
     }
 

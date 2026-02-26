@@ -3,10 +3,8 @@ use crate::commands::video::transcribe_chunked;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::managers::audio::AudioRecordingManager;
 use crate::managers::journal::{
-    ChatMessage, ChatSession, JournalEntry, JournalFolder, JournalManager,
+    ChatMessage, ChatSession, JournalEntry, JournalFolder, JournalManager, JournalRecordingResult,
 };
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-use crate::managers::journal::JournalRecordingResult;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use crate::managers::transcription::TranscriptionManager;
 use std::sync::Arc;
@@ -115,6 +113,128 @@ pub async fn get_partial_journal_transcription(
     Ok(transcription)
 }
 
+// ─── Mobile recording commands ─────────────────────────────────────────────
+// On mobile, audio is recorded in the frontend (WebView Web Audio API) and
+// sent to the backend as a raw f32 audio file path for WAV conversion.
+
+/// Mobile: start recording is a no-op — frontend manages WebView audio capture.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+#[specta::specta]
+pub async fn start_journal_recording() -> Result<(), String> {
+    log::info!("Mobile: start_journal_recording (frontend manages audio capture)");
+    Ok(())
+}
+
+/// Mobile: stop recording — receives raw f32 audio file from frontend, saves as WAV.
+/// The `audio_file_path` points to a temp file containing raw f32 little-endian samples
+/// at 16kHz mono, written by the frontend's Web Audio API.
+/// Attempts cloud transcription if an API key is configured.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+#[specta::specta]
+pub async fn stop_journal_recording(
+    app: AppHandle,
+    journal_manager: State<'_, Arc<JournalManager>>,
+    audio_file_path: String,
+) -> Result<JournalRecordingResult, String> {
+    // Read raw f32 samples from the temp file
+    let bytes =
+        std::fs::read(&audio_file_path).map_err(|e| format!("Failed to read audio file: {}", e))?;
+
+    let samples: Vec<f32> = bytes
+        .chunks_exact(4)
+        .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
+        .collect();
+
+    if samples.is_empty() {
+        return Err("No audio data recorded".to_string());
+    }
+
+    // Save WAV file
+    let timestamp = chrono::Utc::now().timestamp();
+    let file_name = format!("mutter-{}.wav", timestamp);
+    let file_path = journal_manager.effective_recordings_dir().join(&file_name);
+
+    crate::audio_save::save_wav_file(&file_path, &samples)
+        .await
+        .map_err(|e| format!("Failed to save recording: {}", e))?;
+
+    // Clean up temp file
+    let _ = std::fs::remove_file(&audio_file_path);
+
+    log::info!(
+        "Mobile: saved recording as {} ({} samples, {:.1}s)",
+        file_name,
+        samples.len(),
+        samples.len() as f64 / 16000.0
+    );
+
+    // Try cloud transcription if API key is configured
+    let transcription_text = match crate::cloud_transcribe::transcribe_audio_cloud(
+        &app,
+        file_path.to_str().unwrap_or_default(),
+    )
+    .await
+    {
+        Ok(text) => {
+            log::info!("Cloud transcription succeeded: {} chars", text.len());
+            text
+        }
+        Err(e) => {
+            log::warn!(
+                "Cloud transcription unavailable: {}. Entry saved without transcription.",
+                e
+            );
+            String::new()
+        }
+    };
+
+    Ok(JournalRecordingResult {
+        file_name,
+        transcription_text,
+    })
+}
+
+/// Mobile: partial transcription not available — returns empty string.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+#[specta::specta]
+pub async fn get_partial_journal_transcription() -> Result<String, String> {
+    Ok(String::new())
+}
+
+/// Mobile: import audio file — reads WAV, saves copy, returns result.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+#[specta::specta]
+pub async fn import_audio_for_journal(
+    _app: AppHandle,
+    journal_manager: State<'_, Arc<JournalManager>>,
+    file_path: String,
+) -> Result<JournalRecordingResult, String> {
+    use std::path::Path;
+
+    let src_path = Path::new(&file_path);
+    if !src_path.exists() {
+        return Err(format!("File not found: {}", file_path));
+    }
+
+    // Copy the file to recordings directory
+    let timestamp = chrono::Utc::now().timestamp();
+    let file_name = format!("mutter-{}.wav", timestamp);
+    let dest_path = journal_manager.effective_recordings_dir().join(&file_name);
+
+    std::fs::copy(src_path, &dest_path).map_err(|e| format!("Failed to copy audio file: {}", e))?;
+
+    log::info!("Mobile: imported audio as {}", file_name);
+
+    Ok(JournalRecordingResult {
+        file_name,
+        transcription_text: String::new(), // No on-device transcription yet
+    })
+}
+
 #[tauri::command]
 #[specta::specta]
 pub async fn discard_journal_recording(
@@ -194,7 +314,14 @@ pub async fn update_journal_entry(
     user_source: Option<String>,
 ) -> Result<(), String> {
     journal_manager
-        .update_entry(id, title, tags, linked_entry_ids, folder_id, user_source.unwrap_or_default())
+        .update_entry(
+            id,
+            title,
+            tags,
+            linked_entry_ids,
+            folder_id,
+            user_source.unwrap_or_default(),
+        )
         .await
         .map_err(|e| e.to_string())
 }
@@ -472,8 +599,8 @@ pub async fn apply_prompt_text_to_journal_entry(
     if let Ok(names) = journal_manager.get_speaker_names(id).await {
         for (speaker_id, name) in &names {
             if !name.is_empty() {
-                clean_text =
-                    clean_text.replace(&format!("[Speaker {}]", speaker_id), &format!("[{}]", name));
+                clean_text = clean_text
+                    .replace(&format!("[Speaker {}]", speaker_id), &format!("[{}]", name));
             }
         }
     }

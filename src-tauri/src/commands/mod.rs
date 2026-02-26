@@ -5,6 +5,8 @@ pub mod journal;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod meeting;
 pub mod models;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod share;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod transcription;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

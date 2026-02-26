@@ -393,6 +393,8 @@
       "importAudioDesc": "Drop a WAV file or click to browse",
       "importingAudio": "Importing...",
       "importingTranscribeHint": "Processing audio and generating transcript...",
+      "micPermissionDenied": "Microphone permission denied. Please allow access in your device settings.",
+      "recordingFailed": "Failed to start recording. Please try again.",
       "recordingHint": "Speak into your microphone. Click stop when you're done.",
       "transcribing": "Transcribing...",
       "stopRecording": "Stop",

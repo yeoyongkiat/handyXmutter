@@ -5,11 +5,14 @@ mod actions;
 mod apple_intelligence;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod audio_feedback;
+pub mod audio_save;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod audio_toolkit;
 pub mod cli;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod clipboard;
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub mod cloud_transcribe;
 mod commands;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub mod diarize;
@@ -61,9 +64,9 @@ pub use transcription_coordinator::TranscriptionCoordinator;
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::tray::TrayIconBuilder;
-use tauri::{AppHandle, Emitter, Manager};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::Listener;
+use tauri::{AppHandle, Emitter, Manager};
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_log::{Builder as LogBuilder, RotationStrategy, Target, TargetKind};
@@ -472,6 +475,12 @@ fn run_inner(cli_args: CliArgs) {
         commands::get_default_settings,
         commands::get_log_dir_path,
         commands::set_log_level,
+        // Mobile recording commands (audio captured in frontend WebView)
+        commands::journal::start_journal_recording,
+        commands::journal::stop_journal_recording,
+        commands::journal::get_partial_journal_transcription,
+        commands::journal::import_audio_for_journal,
+        commands::journal::discard_journal_recording,
         commands::journal::save_journal_entry,
         commands::journal::get_journal_entries,
         commands::journal::get_journal_entry,
@@ -516,6 +525,9 @@ fn run_inner(cli_args: CliArgs) {
         commands::models::is_model_loading,
         commands::models::has_any_models_available,
         commands::models::has_any_models_or_downloads,
+        // Share intent handling
+        commands::share::get_pending_share,
+        commands::share::clear_pending_share,
         helpers::clamshell::is_laptop,
     ]);
 

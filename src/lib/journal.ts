@@ -352,8 +352,15 @@ export function getModelContextWindow(modelName: string): number {
 export const journalCommands = {
   startRecording: () => invoke<void>("start_journal_recording"),
 
-  stopRecording: () =>
-    invoke<JournalRecordingResult>("stop_journal_recording"),
+  /** Stop recording.
+   * On desktop: no args needed (audio is in Rust).
+   * On mobile: pass `audioFilePath` pointing to raw f32 temp file from WebView recording. */
+  stopRecording: (audioFilePath?: string) =>
+    audioFilePath
+      ? invoke<JournalRecordingResult>("stop_journal_recording", {
+          audioFilePath,
+        })
+      : invoke<JournalRecordingResult>("stop_journal_recording"),
 
   getPartialTranscription: () =>
     invoke<string>("get_partial_journal_transcription"),
